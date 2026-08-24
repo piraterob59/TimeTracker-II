@@ -1073,12 +1073,35 @@ el('#sync-signout-btn').addEventListener('click', async () => {
   renderSyncStatus();
 });
 
+// ---------- build info ----------
+
+// version.json is written by the GitHub Actions deploy workflow (see
+// .github/workflows/deploy-pages.yml) and doesn't exist for a local
+// `python -m http.server` copy — the 404 there is expected, not an error,
+// so #build-info just keeps its "local copy" default in that case.
+async function loadBuildInfo() {
+  try {
+    const res = await fetch('./version.json', { cache: 'no-store' });
+    if (!res.ok) return;
+    const info = await res.json();
+    if (!info.sha) return;
+    document.title = `TimeTracker · ${info.sha}`;
+    const deployed = info.deployedAt
+      ? new Date(info.deployedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+      : 'unknown time';
+    el('#build-info').textContent = `Build: ${info.sha} · deployed ${deployed}`;
+  } catch {
+    // offline or not deployed — leave the default message
+  }
+}
+
 // ---------- init ----------
 
 async function init() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
+  loadBuildInfo();
   await initSync(store, async () => { await reload(); });
   await reload();
   ensureTicking();
