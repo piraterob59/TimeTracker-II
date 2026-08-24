@@ -1,4 +1,4 @@
-const CACHE_NAME = 'timetracker-v15';
+const CACHE_NAME = 'timetracker-v17';
 const APP_SHELL = [
   './',
   './index.html',
@@ -35,8 +35,12 @@ self.addEventListener('fetch', (event) => {
   // Network-first: always prefer the freshest deployed files when online.
   // Cache is only a fallback for offline use, so updates show up immediately
   // instead of waiting on the browser's service-worker update cycle.
+  // `cache: 'no-store'` is essential here — without it, `fetch()` can be
+  // silently satisfied by the browser's own HTTP cache instead of a real
+  // network round-trip, which defeats "network-first" entirely and is why
+  // edits could fail to show up even after a hard refresh.
   event.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-store' })
       .then((res) => {
         if (res && res.status === 200) {
           const clone = res.clone();

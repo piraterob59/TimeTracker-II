@@ -728,6 +728,73 @@ function openEndAtModal() {
   });
 }
 
+function openExportModal() {
+  const payload = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    projects: state.projects,
+    entries: state.entries,
+  };
+  const json = JSON.stringify(payload, null, 2);
+  openModal(`
+    <h2>Export data</h2>
+    <p class="hint-text">Copy this text, then paste it into Import data on the other install.</p>
+    <div class="field">
+      <textarea id="ex-json" rows="10" readonly>${escapeHtml(json)}</textarea>
+    </div>
+    <p class="hint-text" id="ex-status"></p>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="ex-close">Close</button>
+      <button class="btn" id="ex-copy">Copy</button>
+    </div>
+  `);
+  const textarea = el('#ex-json');
+  el('#ex-close').addEventListener('click', closeModal);
+  el('#ex-copy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(json);
+      el('#ex-status').textContent = 'Copied to clipboard.';
+    } catch {
+      textarea.focus();
+      textarea.select();
+      el('#ex-status').textContent = 'Could not access the clipboard — text is selected, copy it manually.';
+    }
+  });
+}
+
+function openImportModal() {
+  openModal(`
+    <h2>Import data</h2>
+    <p class="hint-text">Paste the text from Export data on the other install. Imported projects and entries are added alongside what's already here.</p>
+    <div class="field">
+      <textarea id="im-json" rows="10" placeholder="Paste exported JSON here"></textarea>
+    </div>
+    <p class="hint-text" id="im-error"></p>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="im-cancel">Cancel</button>
+      <button class="btn" id="im-import">Import</button>
+    </div>
+  `);
+  el('#im-cancel').addEventListener('click', closeModal);
+  el('#im-import').addEventListener('click', async () => {
+    let payload;
+    try {
+      payload = JSON.parse(el('#im-json').value);
+    } catch {
+      el('#im-error').textContent = 'That is not valid JSON.';
+      return;
+    }
+    if (!Array.isArray(payload.projects) || !Array.isArray(payload.entries)) {
+      el('#im-error').textContent = 'This does not look like exported TimeTracker data.';
+      return;
+    }
+    for (const p of payload.projects) await saveProject(p);
+    for (const e of payload.entries) await saveEntry(e);
+    closeModal();
+    await reload();
+  });
+}
+
 function openProjectModal(project) {
   const isEdit = !!project;
   const p = project || { id: null, name: '', color: PROJECT_COLORS[state.projects.length % PROJECT_COLORS.length], archived: false };
@@ -968,6 +1035,9 @@ el('#start-at-btn').addEventListener('click', openStartAtModal);
 el('#end-at-btn').addEventListener('click', openEndAtModal);
 el('#add-project-btn').addEventListener('click', () => openProjectModal(null));
 el('#add-entry-btn').addEventListener('click', () => openEntryModal(null));
+
+el('#export-data-btn').addEventListener('click', openExportModal);
+el('#import-data-btn').addEventListener('click', openImportModal);
 
 el('#sync-setup-btn').addEventListener('click', openSyncModal);
 el('#sync-signout-btn').addEventListener('click', async () => {
