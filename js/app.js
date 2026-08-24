@@ -13,6 +13,7 @@ const state = {
   running: null, // entry object with end === null
   pendingProjectId: null, // project chosen but not yet started (client-side only, never persisted)
   view: 'timer',
+  chartOffsetWeeks: 0, // 0 = the 7 days ending today; 1 = the 7 days before that, etc.
 };
 
 const el = (sel) => document.querySelector(sel);
@@ -297,7 +298,7 @@ function renderHistory() {
 
   const chartStart = new Date(now);
   chartStart.setHours(0, 0, 0, 0);
-  chartStart.setDate(chartStart.getDate() - 6);
+  chartStart.setDate(chartStart.getDate() - 6 - state.chartOffsetWeeks * 7);
   renderWeekChart(completed, chartStart.getTime());
 
   const groups = new Map();
@@ -371,14 +372,31 @@ function renderWeekChart(completed, chartStart) {
   const card = el('#week-chart-card');
   const chartEl = el('#week-chart');
   const legendEl = el('#week-chart-legend');
+  const rangeLabel = el('#week-range-label');
+  const nextBtn = el('#week-next-btn');
 
-  if (projectIdsInWeek.size === 0) {
+  // Hide the whole card (nav included) only when there's no history to page
+  // through at all — otherwise keep navigation available even for a range
+  // with no entries, so paging further back still works.
+  if (completed.length === 0) {
     card.classList.add('hidden');
     chartEl.innerHTML = '';
     legendEl.innerHTML = '';
     return;
   }
   card.classList.remove('hidden');
+
+  const fmtRangeDate = (d) => d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  rangeLabel.textContent = state.chartOffsetWeeks === 0
+    ? `Last 7 days`
+    : `${fmtRangeDate(days[0])} – ${fmtRangeDate(days[6])}`;
+  nextBtn.disabled = state.chartOffsetWeeks === 0;
+
+  if (projectIdsInWeek.size === 0) {
+    chartEl.innerHTML = '<p class="hint-text" style="margin:4px 2px 8px">No entries in this range.</p>';
+    legendEl.innerHTML = '';
+    return;
+  }
 
   const projectsInWeek = [...projectIdsInWeek]
     .map((id) => projectById(id))
@@ -1035,6 +1053,16 @@ el('#start-at-btn').addEventListener('click', openStartAtModal);
 el('#end-at-btn').addEventListener('click', openEndAtModal);
 el('#add-project-btn').addEventListener('click', () => openProjectModal(null));
 el('#add-entry-btn').addEventListener('click', () => openEntryModal(null));
+
+el('#week-prev-btn').addEventListener('click', () => {
+  state.chartOffsetWeeks += 1;
+  renderHistory();
+});
+el('#week-next-btn').addEventListener('click', () => {
+  if (state.chartOffsetWeeks === 0) return;
+  state.chartOffsetWeeks -= 1;
+  renderHistory();
+});
 
 el('#export-data-btn').addEventListener('click', openExportModal);
 el('#import-data-btn').addEventListener('click', openImportModal);

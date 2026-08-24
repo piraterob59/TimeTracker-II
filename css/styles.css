@@ -240,8 +240,37 @@ html, body {
   margin: 0 -16px 16px;
 }
 
-.week-chart-card .section-title {
+.week-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 10px;
+  gap: 10px;
+}
+
+.week-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.week-range-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.week-nav .icon-btn {
+  padding: 6px 10px;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.icon-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 #week-chart svg {

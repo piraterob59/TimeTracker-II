@@ -59,7 +59,14 @@
       </div>
 
       <div id="week-chart-card" class="week-chart-card hidden">
-        <div class="section-title" style="margin-top:0">Minutes per day (last 7 days)</div>
+        <div class="week-chart-header">
+          <div class="section-title" style="margin:0">Minutes per day</div>
+          <div class="week-nav">
+            <button id="week-prev-btn" class="icon-btn" aria-label="Previous week">‹</button>
+            <span id="week-range-label" class="week-range-label"></span>
+            <button id="week-next-btn" class="icon-btn" aria-label="Next week">›</button>
+          </div>
+        </div>
         <div id="week-chart"></div>
         <div id="week-chart-legend" class="chart-legend"></div>
       </div>
