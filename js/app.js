@@ -11,6 +11,7 @@ const state = {
   projectsById: new Map(), // kept in sync with `projects` on every reload(), for O(1) lookups
   entries: [],
   running: null, // entry object with end === null
+  pendingProjectId: null, // project chosen but not yet started (client-side only, never persisted)
   view: 'timer',
 };
 
@@ -102,6 +103,9 @@ function renderTimer() {
   const runningCard = el('#running-card');
   const idleHint = el('#idle-hint');
   const grid = el('#project-grid');
+  const startBtn = el('#start-btn');
+  const pauseBtn = el('#pause-btn');
+  const secondaryActions = el('#running-actions-secondary');
 
   if (state.running) {
     runningCard.classList.remove('hidden');
@@ -114,7 +118,24 @@ function renderTimer() {
     autoResizeNote(runningNoteEl);
     el('#running-time').textContent = fmtHMS(entryDuration(state.running));
     el('#running-badge').classList.toggle('hidden', !state.running.paused);
-    el('#pause-btn').textContent = state.running.paused ? 'Resume' : 'Pause';
+    pauseBtn.textContent = state.running.paused ? 'Resume' : 'Pause';
+    startBtn.classList.add('hidden');
+    pauseBtn.disabled = false;
+    secondaryActions.classList.remove('hidden');
+  } else if (state.pendingProjectId) {
+    runningCard.classList.remove('hidden');
+    idleHint.classList.add('hidden');
+    const p = projectById(state.pendingProjectId);
+    const nameEl = el('#running-project-name');
+    nameEl.textContent = p ? p.name : 'Unknown project';
+    nameEl.style.color = p ? p.color : 'var(--text-dim)';
+    runningNoteEl.value = '';
+    autoResizeNote(runningNoteEl);
+    el('#running-time').textContent = '00:00:00';
+    el('#running-badge').classList.add('hidden');
+    startBtn.classList.remove('hidden');
+    pauseBtn.disabled = true;
+    secondaryActions.classList.add('hidden');
   } else {
     runningCard.classList.add('hidden');
     idleHint.classList.remove('hidden');
@@ -125,14 +146,15 @@ function renderTimer() {
   if (active.length === 0) {
     grid.innerHTML = '<p class="hint-text">No projects yet. Add one in the Projects tab.</p>';
   }
+  const selectionLocked = !!(state.running || state.pendingProjectId);
   for (const p of active) {
     const btn = document.createElement('button');
     btn.className = 'project-tile';
     btn.style.background = p.color;
     btn.textContent = p.name;
-    btn.disabled = !!(state.running && state.running.projectId === p.id);
+    btn.disabled = selectionLocked;
     if (btn.disabled) btn.style.opacity = '0.5';
-    btn.addEventListener('click', () => startTimer(p.id));
+    btn.addEventListener('click', () => selectProject(p.id));
     grid.appendChild(btn);
   }
 }
@@ -485,13 +507,19 @@ function closePause(entry, atMs) {
   entry.pausedAt = null;
 }
 
-async function startTimer(projectId) {
-  if (state.running) {
-    await stopTimer();
-  }
+// Stages a project for tracking without starting the clock. Purely
+// client-side (never persisted) so an abandoned selection leaves no trace.
+function selectProject(projectId) {
+  if (state.running || state.pendingProjectId) return;
+  state.pendingProjectId = projectId;
+  renderTimer();
+}
+
+async function beginRunning() {
+  if (!state.pendingProjectId || state.running) return;
   const entry = {
     id: uuid(),
-    projectId,
+    projectId: state.pendingProjectId,
     start: new Date().toISOString(),
     end: null,
     note: '',
@@ -500,6 +528,7 @@ async function startTimer(projectId) {
     pauseMs: 0,
     updatedAt: Date.now(),
   };
+  state.pendingProjectId = null;
   await saveEntry(entry);
   ensureTicking();
   await reload();
@@ -569,14 +598,14 @@ modalBackdrop.addEventListener('click', (e) => {
   if (e.target === modalBackdrop) closeModal();
 });
 
-function openConfirm(message) {
+function openConfirm(message, confirmLabel = 'Delete') {
   return new Promise((resolve) => {
     openModal(`
       <h2>Are you sure?</h2>
       <p class="hint-text">${escapeHtml(message)}</p>
       <div class="modal-actions">
         <button class="btn btn-secondary" id="cf-cancel">Cancel</button>
-        <button class="btn btn-danger" id="cf-ok">Delete</button>
+        <button class="btn btn-danger" id="cf-ok">${escapeHtml(confirmLabel)}</button>
       </div>
     `);
     el('#cf-cancel').addEventListener('click', () => { closeModal(); resolve(false); });
@@ -922,7 +951,18 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchView(btn.dataset.view));
 });
 
-el('#stop-btn').addEventListener('click', () => stopTimer());
+el('#start-btn').addEventListener('click', beginRunning);
+el('#stop-btn').addEventListener('click', async () => {
+  if (state.pendingProjectId) {
+    state.pendingProjectId = null;
+    renderTimer();
+    return;
+  }
+  if (!state.running) return;
+  const ok = await openConfirm('End this session and save your time?', 'End session');
+  if (!ok) return;
+  await stopTimer();
+});
 el('#pause-btn').addEventListener('click', togglePause);
 el('#start-at-btn').addEventListener('click', openStartAtModal);
 el('#end-at-btn').addEventListener('click', openEndAtModal);
