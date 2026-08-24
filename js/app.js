@@ -389,7 +389,7 @@ function renderWeekChart(completed, chartStart) {
   const maxTotal = Math.max(1, ...dayTotals);
 
   const width = 700;
-  const height = 220;
+  const height = 260;
   const padTop = 16;
   const padBottom = 28;
   const padSide = 12;

@@ -100,6 +100,10 @@ html, body {
   background: #16a34a;
 }
 
+#pause-btn {
+  border: 2px solid var(--accent);
+}
+
 .full { width: 100%; margin-bottom: 14px; }
 
 .idle-hint {
@@ -233,7 +237,7 @@ html, body {
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 14px 14px 6px;
-  margin-bottom: 16px;
+  margin: 0 -16px 16px;
 }
 
 .week-chart-card .section-title {
@@ -248,15 +252,19 @@ html, body {
 
 .chart-legend {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
+  flex-wrap: nowrap;
+  gap: 16px;
   padding: 10px 2px 12px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .chart-legend-item {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 0 0 auto;
+  white-space: nowrap;
   font-size: 12px;
   color: var(--text-dim);
 }
