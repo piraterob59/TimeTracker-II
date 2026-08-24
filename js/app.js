@@ -89,6 +89,21 @@ async function reload() {
   state.entries = await store.getAllEntries();
   state.running = state.entries.find((e) => e.end === null) || null;
   renderAll();
+  syncAppBadge();
+}
+
+// Badges the Home Screen icon (iOS 16.4+, also Chrome/Edge on desktop and
+// Android) while a timer is running, so it's visible without opening the
+// app. Client-side only — the OS keeps showing the badge after the app is
+// backgrounded, no push/server needed. Feature-detected since older
+// browsers don't support the Badging API at all.
+function syncAppBadge() {
+  if (!('setAppBadge' in navigator)) return;
+  if (state.running) {
+    navigator.setAppBadge().catch(() => {});
+  } else {
+    navigator.clearAppBadge().catch(() => {});
+  }
 }
 
 // ---------- rendering ----------
