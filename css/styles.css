@@ -379,9 +379,11 @@ html, body {
   font-size: 13px;
   color: var(--text-dim);
   margin-top: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* pre-line (not the old nowrap+ellipsis) so a multi-line note -- e.g. a
+     numbered session summary -- actually displays as entered instead of
+     being collapsed to one line and truncated. entry-row has no fixed
+     height, so a taller note just grows the row. */
+  white-space: pre-line;
 }
 
 .entry-duration {
