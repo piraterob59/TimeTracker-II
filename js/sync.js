@@ -21,6 +21,43 @@ export function getConfig() {
   }
 }
 
+// Reads a pasted Firebase config, either as strict JSON or exactly as the
+// Firebase console shows it (`const firebaseConfig = { apiKey: "...", ... };`),
+// and sanity-checks the API key so a bad copy/paste fails with a clear
+// message instead of Firebase's generic "api-key-not-valid" error.
+export function parseConfigText(raw) {
+  const text = raw.replace(/[“”]/g, '"').trim();
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end <= start) {
+    throw new Error('No config found. Paste the whole firebaseConfig block from the Firebase console.');
+  }
+  const body = text.slice(start, end + 1);
+
+  let config;
+  try {
+    config = JSON.parse(body);
+  } catch {
+    // The console's snippet is a JS object literal: unquoted keys, maybe a trailing comma.
+    const asJson = body
+      .replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":')
+      .replace(/,(\s*})/g, '$1');
+    try {
+      config = JSON.parse(asJson);
+    } catch {
+      throw new Error("Couldn't read that as a Firebase config. Paste the whole firebaseConfig block from the Firebase console.");
+    }
+  }
+
+  if (!/^[A-Za-z0-9_.-]{20,}$/.test(config.apiKey || '')) {
+    throw new Error('The apiKey contains characters a real key wouldn’t (like • or *) or is missing. Copy it again from the Firebase console.');
+  }
+  for (const field of ['projectId', 'appId']) {
+    if (!config[field]) throw new Error(`The config is missing "${field}".`);
+  }
+  return config;
+}
+
 export function syncStatus() {
   return { connected: !!currentUser, email: currentUser ? currentUser.email : null };
 }

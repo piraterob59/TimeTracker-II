@@ -1,5 +1,5 @@
 import { store, uuid } from './db.js';
-import { syncStatus, initSync, getConfig, connectWithConfig, disconnectSync, pushProject, pushEntry, pushDeleteProject, pushDeleteEntry } from './sync.js';
+import { syncStatus, initSync, getConfig, parseConfigText, connectWithConfig, disconnectSync, pushProject, pushEntry, pushDeleteProject, pushDeleteEntry } from './sync.js';
 
 const PROJECT_COLORS = [
   '#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed',
@@ -652,8 +652,8 @@ function openSyncModal() {
     <h2>Cloud sync setup</h2>
     <p class="hint-text">Create a free project at console.firebase.google.com, enable <strong>Firestore</strong> and <strong>Google</strong> sign-in under Authentication, then paste your web app config below (Project settings → Your apps → SDK setup and configuration).</p>
     <div class="field">
-      <label>Firebase config (JSON)</label>
-      <textarea id="sf-config" rows="6" placeholder='{"apiKey": "...", "authDomain": "...", "projectId": "..."}'>${existing ? escapeHtml(JSON.stringify(existing, null, 2)) : ''}</textarea>
+      <label>Firebase config (paste it exactly as the console shows it)</label>
+      <textarea id="sf-config" rows="6" placeholder='const firebaseConfig = { apiKey: "...", authDomain: "...", projectId: "...", ... };'>${existing ? escapeHtml(JSON.stringify(existing, null, 2)) : ''}</textarea>
     </div>
     <p class="hint-text" id="sf-error"></p>
     <div class="modal-actions">
@@ -663,12 +663,11 @@ function openSyncModal() {
   `);
   el('#sf-cancel').addEventListener('click', closeModal);
   el('#sf-connect').addEventListener('click', async () => {
-    const raw = el('#sf-config').value.trim();
     let config;
     try {
-      config = JSON.parse(raw);
-    } catch {
-      el('#sf-error').textContent = 'That is not valid JSON.';
+      config = parseConfigText(el('#sf-config').value);
+    } catch (err) {
+      el('#sf-error').textContent = err.message;
       return;
     }
     const btn = el('#sf-connect');
