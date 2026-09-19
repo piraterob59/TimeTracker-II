@@ -4,6 +4,8 @@ const SDK_VERSION = '10.7.0';
 let fbApp = null;
 let fbAuth = null;
 let fbDb = null;
+let activeConfigKey = null; // JSON of the config fbApp was created with
+let _appMod = null;
 let _authMod = null;
 let _fsMod = null;
 let currentUser = null;
@@ -62,18 +64,56 @@ export function syncStatus() {
   return { connected: !!currentUser, email: currentUser ? currentUser.email : null };
 }
 
+// Tears down the running Firebase app (if any) so a different config can be
+// used. Without this, a config saved from an earlier attempt keeps being used
+// even after a new one is pasted.
+async function resetFirebase() {
+  stopListening();
+  currentUser = null;
+  const app = fbApp;
+  fbApp = null;
+  fbAuth = null;
+  fbDb = null;
+  activeConfigKey = null;
+  if (app && _appMod) {
+    try { await _appMod.deleteApp(app); } catch { /* already gone */ }
+  }
+}
+
+// Mirrors sign-in state into `currentUser`, and on sign-in uploads local data
+// once and starts listening for remote changes. Attached whenever an app is
+// created, so a first-time connect (no saved config at page load) is noticed
+// without needing a reload.
+function watchAuth() {
+  _authMod.onAuthStateChanged(fbAuth, async (user) => {
+    currentUser = user;
+    if (user) {
+      await uploadLocalDataOnce(user.uid);
+      startListening();
+    } else {
+      stopListening();
+    }
+    if (onRemoteChangeCb) onRemoteChangeCb();
+  });
+}
+
 async function ensureFirebase(config) {
-  if (fbApp) return;
-  const [{ initializeApp }, authMod, fsMod] = await Promise.all([
+  const configKey = JSON.stringify(config);
+  if (fbApp && configKey === activeConfigKey) return;
+  if (fbApp) await resetFirebase();
+  const [appMod, authMod, fsMod] = await Promise.all([
     import(`https://www.gstatic.com/firebasejs/${SDK_VERSION}/firebase-app.js`),
     import(`https://www.gstatic.com/firebasejs/${SDK_VERSION}/firebase-auth.js`),
     import(`https://www.gstatic.com/firebasejs/${SDK_VERSION}/firebase-firestore.js`),
   ]);
+  _appMod = appMod;
   _authMod = authMod;
   _fsMod = fsMod;
-  fbApp = initializeApp(config);
+  fbApp = appMod.initializeApp(config);
+  activeConfigKey = configKey;
   fbAuth = authMod.getAuth(fbApp);
   fbDb = fsMod.getFirestore(fbApp);
+  watchAuth();
 }
 
 function userCollection(kind) {
@@ -151,30 +191,30 @@ export async function initSync(store, onRemoteChange) {
   } catch (err) {
     console.warn('Redirect sign-in failed', err);
   }
-  _authMod.onAuthStateChanged(fbAuth, async (user) => {
-    currentUser = user;
-    if (user) {
-      await uploadLocalDataOnce(user.uid);
-      startListening();
-    } else {
-      stopListening();
-    }
-    if (onRemoteChangeCb) onRemoteChangeCb();
-  });
 }
 
 export async function connectWithConfig(config, onRemoteChange) {
+  // Saved up front so the redirect sign-in flow (which reloads the page) can
+  // pick the config back up; put back the old one if this attempt fails.
+  const previous = localStorage.getItem(CONFIG_KEY);
   localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
   if (onRemoteChange) onRemoteChangeCb = onRemoteChange;
-  await ensureFirebase(config);
-  const provider = new _authMod.GoogleAuthProvider();
   try {
-    await _authMod.signInWithPopup(fbAuth, provider);
-  } catch (err) {
-    if (err && (err.code === 'auth/operation-not-supported-in-this-environment' || err.code === 'auth/popup-blocked')) {
-      await _authMod.signInWithRedirect(fbAuth, provider);
-      return;
+    await ensureFirebase(config);
+    const provider = new _authMod.GoogleAuthProvider();
+    try {
+      await _authMod.signInWithPopup(fbAuth, provider);
+    } catch (err) {
+      if (err && (err.code === 'auth/operation-not-supported-in-this-environment' || err.code === 'auth/popup-blocked')) {
+        await _authMod.signInWithRedirect(fbAuth, provider);
+        return;
+      }
+      throw err;
     }
+  } catch (err) {
+    // A config that failed must not linger: it would be started again on every page load.
+    if (previous === null) localStorage.removeItem(CONFIG_KEY);
+    else localStorage.setItem(CONFIG_KEY, previous);
     throw err;
   }
 }
@@ -183,12 +223,8 @@ export async function disconnectSync() {
   if (fbAuth && _authMod) {
     try { await _authMod.signOut(fbAuth); } catch { /* ignore */ }
   }
-  stopListening();
-  currentUser = null;
+  await resetFirebase();
   localStorage.removeItem(CONFIG_KEY);
-  fbApp = null;
-  fbAuth = null;
-  fbDb = null;
   _authMod = null;
   _fsMod = null;
 }
