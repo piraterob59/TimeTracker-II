@@ -5,6 +5,7 @@ let fbApp = null;
 let fbAuth = null;
 let fbDb = null;
 let activeConfigKey = null; // JSON of the config fbApp was created with
+let syncError = null; // most recent sync failure, shown in Settings
 let _appMod = null;
 let _authMod = null;
 let _fsMod = null;
@@ -61,7 +62,24 @@ export function parseConfigText(raw) {
 }
 
 export function syncStatus() {
-  return { connected: !!currentUser, email: currentUser ? currentUser.email : null };
+  return { connected: !!currentUser, email: currentUser ? currentUser.email : null, error: syncError };
+}
+
+// Sign-in can succeed while every read/write is refused (e.g. Firestore rules
+// not published yet), so the app would say "Connected" while nothing syncs.
+// Remember the most recent failure so Settings can show it.
+function reportSyncError(err) {
+  console.warn('sync problem', err);
+  syncError = err && err.code === 'permission-denied'
+    ? "Firestore is refusing access, so nothing is syncing. The security rules probably haven't been published: Firebase console → Firestore Database → Rules."
+    : (err && err.message) || String(err);
+  if (onRemoteChangeCb) onRemoteChangeCb();
+}
+
+function clearSyncError() {
+  if (!syncError) return;
+  syncError = null;
+  if (onRemoteChangeCb) onRemoteChangeCb();
 }
 
 // Tears down the running Firebase app (if any) so a different config can be
@@ -70,6 +88,7 @@ export function syncStatus() {
 async function resetFirebase() {
   stopListening();
   currentUser = null;
+  syncError = null;
   const app = fbApp;
   fbApp = null;
   fbAuth = null;
@@ -88,7 +107,11 @@ function watchAuth() {
   _authMod.onAuthStateChanged(fbAuth, async (user) => {
     currentUser = user;
     if (user) {
-      await uploadLocalDataOnce(user.uid);
+      try {
+        await uploadLocalDataOnce(user.uid);
+      } catch (err) {
+        reportSyncError(err); // still start listening below; the upload is retried on the next load
+      }
       startListening();
     } else {
       stopListening();
@@ -146,7 +169,8 @@ function subscribeCollection(kind, { put, del }) {
       }
     });
     if (changed && onRemoteChangeCb) onRemoteChangeCb();
-  });
+    clearSyncError();
+  }, reportSyncError);
 }
 
 function startListening() {
@@ -231,12 +255,12 @@ export async function disconnectSync() {
 
 async function pushDoc(kind, item) {
   if (!currentUser || !fbDb) return;
-  try { await _fsMod.setDoc(userDoc(kind, item.id), item, { merge: true }); } catch (err) { console.warn('sync push failed', err); }
+  try { await _fsMod.setDoc(userDoc(kind, item.id), item, { merge: true }); } catch (err) { reportSyncError(err); }
 }
 
 async function pushDeleteDoc(kind, id) {
   if (!currentUser || !fbDb) return;
-  try { await _fsMod.deleteDoc(userDoc(kind, id)); } catch (err) { console.warn('sync delete failed', err); }
+  try { await _fsMod.deleteDoc(userDoc(kind, id)); } catch (err) { reportSyncError(err); }
 }
 
 export function pushProject(project) {

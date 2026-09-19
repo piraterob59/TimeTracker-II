@@ -492,7 +492,10 @@ function renderSyncStatus() {
   const signedOut = el('#sync-signed-out');
   const signedIn = el('#sync-signed-in');
   if (status.connected) {
-    statusEl.textContent = `Connected as ${status.email || 'your account'}. Data syncs across devices.`;
+    const who = status.email || 'your account';
+    statusEl.textContent = status.error
+      ? `Signed in as ${who}, but syncing is failing: ${status.error}`
+      : `Connected as ${who}. Data syncs across devices.`;
     signedOut.classList.add('hidden');
     signedIn.classList.remove('hidden');
   } else {
