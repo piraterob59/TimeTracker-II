@@ -299,8 +299,8 @@ html, body {
 }
 
 .chart-legend-dot {
-  width: 9px;
-  height: 9px;
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
   flex: 0 0 auto;
 }
@@ -359,8 +359,8 @@ html, body {
 }
 
 .entry-color {
-  width: 10px;
-  height: 10px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   flex: 0 0 auto;
 }
@@ -409,8 +409,8 @@ html, body {
 }
 
 .project-row .entry-color {
-  width: 14px;
-  height: 14px;
+  width: 20px;
+  height: 20px;
 }
 
 .project-row-name {
@@ -551,4 +551,39 @@ html, body {
 textarea {
   resize: vertical;
   min-height: 80px;
+}
+
+.color-field-label { font-size: 12px; color: var(--text-dim); margin: 10px 0 6px; font-weight: 600; }
+.color-preview {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  vertical-align: middle;
+  margin-left: 8px;
+  border: 1px solid var(--border);
+}
+.color-swatch.color-none,
+.color-swatch.color-custom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  border: 2px dashed var(--border);
+  color: var(--text-dim);
+  font-size: 16px;
+  margin: 0;
+  position: relative;
+  overflow: hidden;
+}
+.color-swatch.color-none.selected { border: 2px solid var(--text); }
+.color-custom input[type="color"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  padding: 0;
+  border: 0;
 }

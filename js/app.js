@@ -6,6 +6,18 @@ const PROJECT_COLORS = [
   '#0891b2', '#db2777', '#4b5563', '#ca8a04', '#059669',
 ];
 
+const isHexColor = (c) => typeof c === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(c);
+
+// A project's color has two parts: `color` is the left half of its dot (meant
+// to be shared by every project on the same topic) and the optional `color2`
+// is the right half (specific to the project). Dots are a hard 50/50 split;
+// with no color2 it is just the plain solid color, exactly as before. Values
+// are checked as hex because they end up inside style attributes.
+function projectSwatchCss(p) {
+  const left = p && isHexColor(p.color) ? p.color : '#999';
+  return p && isHexColor(p.color2) ? `linear-gradient(90deg, ${left} 50%, ${p.color2} 50%)` : left;
+}
+
 const state = {
   projects: [],
   projectsById: new Map(), // kept in sync with `projects` on every reload(), for O(1) lookups
@@ -166,7 +178,7 @@ function renderTimer() {
   for (const p of active) {
     const btn = document.createElement('button');
     btn.className = 'project-tile';
-    btn.style.background = p.color;
+    btn.style.background = projectSwatchCss(p);
     btn.textContent = p.name;
     btn.disabled = selectionLocked;
     if (btn.disabled) btn.style.opacity = '0.5';
@@ -346,7 +358,7 @@ function renderHistory() {
       const row = document.createElement('div');
       row.className = 'entry-row';
       row.innerHTML = `
-        <div class="entry-color" style="background:${p ? p.color : '#999'}"></div>
+        <div class="entry-color" style="background:${projectSwatchCss(p)}"></div>
         <div class="entry-main">
           <div class="entry-project">${escapeHtml(p ? p.name : 'Unknown')}</div>
           <div class="entry-meta">${fmtTime(entry.start)} – ${fmtTime(entry.end)}${entry.note ? ' · ' + escapeHtml(entry.note) : ''}</div>
@@ -413,10 +425,33 @@ function renderWeekChart(completed, chartStart) {
     return;
   }
 
-  const projectsInWeek = [...projectIdsInWeek]
+  // Alphabetical, then projects sharing a left color (the same topic) pulled
+  // together, groups ordered by their first member -- so a topic's projects
+  // sit next to each other in every bar and in the legend, and their shared
+  // left half reads as one continuous stripe.
+  const byName = [...projectIdsInWeek]
     .map((id) => projectById(id))
     .filter(Boolean)
     .sort((a, b) => a.name.localeCompare(b.name));
+  const topicOrder = [];
+  for (const p of byName) if (!topicOrder.includes(p.color)) topicOrder.push(p.color);
+  const projectsInWeek = byName.sort((a, b) =>
+    topicOrder.indexOf(a.color) - topicOrder.indexOf(b.color) || a.name.localeCompare(b.name));
+
+  // A project with a right color gets a hard-stop gradient fill (left half /
+  // right half of each bar segment, split at the segment's own middle).
+  let defs = '';
+  const fillFor = new Map();
+  projectsInWeek.forEach((p, i) => {
+    const left = isHexColor(p.color) ? p.color : '#999';
+    if (isHexColor(p.color2)) {
+      const gid = `tt-split-${i}`;
+      defs += `<linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="0"><stop offset="0.5" stop-color="${left}"></stop><stop offset="0.5" stop-color="${p.color2}"></stop></linearGradient>`;
+      fillFor.set(p.id, `url(#${gid})`);
+    } else {
+      fillFor.set(p.id, left);
+    }
+  });
 
   const dayTotals = perDay.map((map) => [...map.values()].reduce((a, b) => a + b, 0));
   const maxTotal = Math.max(1, ...dayTotals);
@@ -440,7 +475,7 @@ function renderWeekChart(completed, chartStart) {
       if (minutes <= 0) continue;
       const segHeight = (minutes / maxTotal) * plotHeight;
       const segY = y - segHeight;
-      bars += `<rect x="${colX.toFixed(1)}" y="${segY.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${Math.max(segHeight, 0).toFixed(1)}" fill="${p.color}" rx="2"></rect>`;
+      bars += `<rect x="${colX.toFixed(1)}" y="${segY.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${Math.max(segHeight, 0).toFixed(1)}" fill="${fillFor.get(p.id)}" rx="2"></rect>`;
       y = segY;
     }
     const labelX = colX + barWidth / 2;
@@ -454,11 +489,11 @@ function renderWeekChart(completed, chartStart) {
 
   const baseline = `<line x1="${padSide}" y1="${height - padBottom}" x2="${width - padSide}" y2="${height - padBottom}" style="stroke:var(--border)" stroke-width="1"></line>`;
 
-  chartEl.innerHTML = `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">${baseline}${bars}</svg>`;
+  chartEl.innerHTML = `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg"><defs>${defs}</defs>${baseline}${bars}</svg>`;
 
   legendEl.innerHTML = projectsInWeek.map((p) => `
     <div class="chart-legend-item">
-      <span class="chart-legend-dot" style="background:${p.color}"></span>
+      <span class="chart-legend-dot" style="background:${projectSwatchCss(p)}"></span>
       <span>${escapeHtml(p.name)}</span>
     </div>
   `).join('');
@@ -475,7 +510,7 @@ function renderProjects() {
     const row = document.createElement('div');
     row.className = 'project-row';
     row.innerHTML = `
-      <div class="entry-color" style="background:${p.color}"></div>
+      <div class="entry-color" style="background:${projectSwatchCss(p)}"></div>
       <div class="project-row-name">${escapeHtml(p.name)}${p.archived ? ' (archived)' : ''}</div>
       <button class="icon-btn" data-action="edit">✏️</button>
       <button class="icon-btn" data-action="delete">🗑</button>
@@ -832,7 +867,19 @@ function openImportModal() {
 
 function openProjectModal(project) {
   const isEdit = !!project;
-  const p = project || { id: null, name: '', color: PROJECT_COLORS[state.projects.length % PROJECT_COLORS.length], archived: false };
+  const p = project || { id: null, name: '', color: PROJECT_COLORS[state.projects.length % PROJECT_COLORS.length], color2: null, archived: false };
+  let leftColor = isHexColor(p.color) ? p.color.toLowerCase() : PROJECT_COLORS[0];
+  let rightColor = isHexColor(p.color2) ? p.color2.toLowerCase() : null;
+  // The presets plus every color any project already uses, so a custom color
+  // picked once (say a topic's shared left color) shows up as a swatch for
+  // the others too and can be reused exactly rather than eyeballed.
+  const palette = [...new Set([
+    ...PROJECT_COLORS,
+    ...state.projects.flatMap((q) => [q.color, q.color2]).filter(isHexColor).map((c) => c.toLowerCase()),
+    leftColor,
+    ...(rightColor ? [rightColor] : []),
+  ])];
+
   openModal(`
     <h2>${isEdit ? 'Edit project' : 'New project'}</h2>
     <div class="field">
@@ -840,10 +887,11 @@ function openProjectModal(project) {
       <input type="text" id="pf-name" value="${escapeHtml(p.name)}" placeholder="e.g. Client Website" />
     </div>
     <div class="field">
-      <label>Color</label>
-      <div class="color-swatches" id="pf-colors">
-        ${PROJECT_COLORS.map((c) => `<div class="color-swatch${c === p.color ? ' selected' : ''}" style="background:${c}" data-color="${c}"></div>`).join('')}
-      </div>
+      <label>Color <span class="color-preview" id="pf-preview"></span></label>
+      <div class="color-field-label">Left half &mdash; topic color (share it across related projects)</div>
+      <div class="color-swatches" id="pf-colors-left"></div>
+      <div class="color-field-label">Right half &mdash; this project</div>
+      <div class="color-swatches" id="pf-colors-right"></div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" id="pf-cancel">Cancel</button>
@@ -852,14 +900,52 @@ function openProjectModal(project) {
     </div>
   `);
 
-  let selectedColor = p.color;
-  modalEl.querySelectorAll('.color-swatch').forEach((sw) => {
-    sw.addEventListener('click', () => {
-      selectedColor = sw.dataset.color;
-      modalEl.querySelectorAll('.color-swatch').forEach((s) => s.classList.remove('selected'));
-      sw.classList.add('selected');
-    });
+  const swatchHtml = (c, selected) => `<div class="color-swatch${selected ? ' selected' : ''}" style="background:${c}" data-color="${c}"></div>`;
+  const customHtml = (id, value) => `<label class="color-swatch color-custom" title="Custom color">+<input type="color" id="${id}" value="${value}"></label>`;
+  const updatePreview = () => {
+    el('#pf-preview').style.background = projectSwatchCss({ color: leftColor, color2: rightColor });
+  };
+  function renderSwatches() {
+    el('#pf-colors-left').innerHTML =
+      palette.map((c) => swatchHtml(c, c === leftColor)).join('') + customHtml('pf-custom-left', leftColor);
+    el('#pf-colors-right').innerHTML =
+      `<div class="color-swatch color-none${rightColor === null ? ' selected' : ''}" data-color="" title="Solid color (no right half)">&#10005;</div>` +
+      palette.map((c) => swatchHtml(c, c === rightColor)).join('') + customHtml('pf-custom-right', rightColor || leftColor);
+    updatePreview();
+  }
+  renderSwatches();
+
+  // Delegated, since renderSwatches() replaces the swatch elements.
+  el('#pf-colors-left').addEventListener('click', (e) => {
+    const sw = e.target.closest('.color-swatch[data-color]');
+    if (!sw) return;
+    leftColor = sw.dataset.color;
+    renderSwatches();
   });
+  el('#pf-colors-right').addEventListener('click', (e) => {
+    const sw = e.target.closest('.color-swatch[data-color]');
+    if (!sw) return;
+    rightColor = sw.dataset.color || null;
+    renderSwatches();
+  });
+  // The picker fires `input` continuously while dragging; re-rendering then
+  // would replace the <input> mid-interaction and close the picker, so only
+  // the preview updates live and the swatch rows are rebuilt once it commits.
+  for (const [side, setColor] of [['left', (c) => { leftColor = c; }], ['right', (c) => { rightColor = c; }]]) {
+    const container = el(`#pf-colors-${side}`);
+    container.addEventListener('input', (e) => {
+      if (!e.target.matches('input[type="color"]')) return;
+      setColor(e.target.value.toLowerCase());
+      updatePreview();
+    });
+    container.addEventListener('change', (e) => {
+      if (!e.target.matches('input[type="color"]')) return;
+      const c = e.target.value.toLowerCase();
+      setColor(c);
+      if (!palette.includes(c)) palette.push(c);
+      renderSwatches();
+    });
+  }
 
   el('#pf-cancel').addEventListener('click', closeModal);
   if (isEdit) {
@@ -876,7 +962,8 @@ function openProjectModal(project) {
     const updated = {
       id: p.id || uuid(),
       name,
-      color: selectedColor,
+      color: leftColor,
+      color2: rightColor || null,
       archived: p.archived || false,
       createdAt: p.id ? p.createdAt : Date.now(),
       updatedAt: Date.now(),

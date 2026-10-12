@@ -1,4 +1,4 @@
-const CACHE_NAME = 'timetracker-v21';
+const CACHE_NAME = 'timetracker-v23';
 const APP_SHELL = [
   './',
   './index.html',
