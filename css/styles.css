@@ -412,6 +412,59 @@ html, body {
   padding: 12px 14px;
 }
 
+/* Projects tab: one group per category (shared left color) */
+.category-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.category-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px 0;
+}
+
+.category-dot {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  vertical-align: -2px;
+}
+
+.category-name {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.category-name.unnamed {
+  color: var(--text-dim);
+  font-style: italic;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+.category-count {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.category-header .icon-btn {
+  margin-left: auto;
+  font-size: 15px;
+}
+
 .project-row .entry-color {
   width: 20px;
   height: 20px;

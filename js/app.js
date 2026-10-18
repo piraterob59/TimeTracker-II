@@ -18,6 +18,16 @@ function projectSwatchCss(p) {
   return p && isHexColor(p.color2) ? `linear-gradient(90deg, ${left} 50%, ${p.color2} 50%)` : left;
 }
 
+// Projects sharing a left color form a category. Its name is stored as
+// `category` on every project in it (so it syncs with the projects, with no
+// extra collection); categoryName() reads it from whichever member has it.
+const categoryKey = (color) => (isHexColor(color) ? color.toLowerCase() : '#999');
+function categoryName(color, exceptId = null) {
+  const key = categoryKey(color);
+  const named = state.projects.find((q) => q.id !== exceptId && categoryKey(q.color) === key && q.category);
+  return named ? named.category : '';
+}
+
 const state = {
   projects: [],
   projectsById: new Map(), // kept in sync with `projects` on every reload(), for O(1) lookups
@@ -506,19 +516,81 @@ function renderProjects() {
     listEl.innerHTML = '<p class="hint-text">No projects yet.</p>';
     return;
   }
+  // Group by category (left color). Named categories first, alphabetically,
+  // then unnamed ones; inside each, active projects A-Z, archived ones last.
+  const groups = new Map();
   for (const p of state.projects) {
-    const row = document.createElement('div');
-    row.className = 'project-row';
-    row.innerHTML = `
-      <div class="entry-color" style="background:${projectSwatchCss(p)}"></div>
-      <div class="project-row-name">${escapeHtml(p.name)}${p.archived ? ' (archived)' : ''}</div>
-      <button class="icon-btn" data-action="edit">✏️</button>
-      <button class="icon-btn" data-action="delete">🗑</button>
-    `;
-    row.querySelector('[data-action="edit"]').addEventListener('click', () => openProjectModal(p));
-    row.querySelector('[data-action="delete"]').addEventListener('click', () => confirmDeleteProject(p));
-    listEl.appendChild(row);
+    const key = categoryKey(p.color);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
   }
+  const ordered = [...groups.entries()]
+    .map(([key, projects]) => ({ key, name: categoryName(key), projects }))
+    .sort((a, b) => (!a.name - !b.name) || a.name.localeCompare(b.name) || a.projects[0].name.localeCompare(b.projects[0].name));
+
+  for (const group of ordered) {
+    group.projects.sort((a, b) => (!!a.archived - !!b.archived) || a.name.localeCompare(b.name));
+    const section = document.createElement('div');
+    section.className = 'category-group';
+    section.innerHTML = `
+      <div class="category-header">
+        <span class="category-dot" style="background:${group.key}"></span>
+        <span class="category-name${group.name ? '' : ' unnamed'}">${group.name ? escapeHtml(group.name) : 'Unnamed category'}</span>
+        <span class="category-count">${group.projects.length}</span>
+        <button class="icon-btn category-rename" title="Name this category">✏️</button>
+      </div>
+    `;
+    section.querySelector('.category-rename').addEventListener('click', () => openCategoryModal(group.key));
+    for (const p of group.projects) {
+      const row = document.createElement('div');
+      row.className = 'project-row';
+      row.innerHTML = `
+        <div class="entry-color" style="background:${projectSwatchCss(p)}"></div>
+        <div class="project-row-name">${escapeHtml(p.name)}${p.archived ? ' (archived)' : ''}</div>
+        <button class="icon-btn" data-action="edit">✏️</button>
+        <button class="icon-btn" data-action="delete">🗑</button>
+      `;
+      row.querySelector('[data-action="edit"]').addEventListener('click', () => openProjectModal(p));
+      row.querySelector('[data-action="delete"]').addEventListener('click', () => confirmDeleteProject(p));
+      section.appendChild(row);
+    }
+    listEl.appendChild(section);
+  }
+}
+
+// Names (or renames) the category with this left color by writing the name
+// onto every project in it; an empty name clears it.
+function openCategoryModal(color) {
+  const key = categoryKey(color);
+  const members = state.projects.filter((q) => categoryKey(q.color) === key);
+  const current = categoryName(key);
+  openModal(`
+    <h2>${current ? 'Rename category' : 'Name category'}</h2>
+    <div class="field">
+      <label><span class="category-dot" style="background:${key}"></span> Category name</label>
+      <input type="text" id="cf-name" value="${escapeHtml(current)}" placeholder="e.g. Music" />
+    </div>
+    <p class="hint-text">${members.length} project${members.length === 1 ? '' : 's'} with this left color: ${members.map((q) => escapeHtml(q.name)).join(', ')}. Leave the name empty to clear it.</p>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="cat-cancel">Cancel</button>
+      <button class="btn" id="cat-save">Save</button>
+    </div>
+  `);
+  const input = el('#cf-name');
+  input.focus();
+  input.select();
+  const save = async () => {
+    const name = input.value.trim() || null;
+    for (const q of members) {
+      if ((q.category || null) === name) continue;
+      await saveProject({ ...q, category: name, updatedAt: Date.now() });
+    }
+    closeModal();
+    await reload();
+  };
+  el('#cat-cancel').addEventListener('click', closeModal);
+  el('#cat-save').addEventListener('click', save);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
 }
 
 function renderSyncStatus() {
@@ -922,7 +994,7 @@ function openProjectModal(project) {
     </div>
     <div class="field">
       <label>Color <span class="color-preview" id="pf-preview"></span></label>
-      <div class="color-field-label">Left half &mdash; topic color (share it across related projects)</div>
+      <div class="color-field-label">Left half &mdash; category color (share it across related projects) <span id="pf-category"></span></div>
       <div class="color-swatches" id="pf-colors-left"></div>
       <div class="color-field-label">Right half &mdash; this project</div>
       <div class="color-swatches" id="pf-colors-right"></div>
@@ -936,8 +1008,13 @@ function openProjectModal(project) {
 
   const swatchHtml = (c, selected) => `<div class="color-swatch${selected ? ' selected' : ''}" style="background:${c}" data-color="${c}"></div>`;
   const customHtml = (id, value) => `<label class="color-swatch color-custom" title="Custom color">+<input type="color" id="${id}" value="${value}"></label>`;
+  // The category a project joins is decided by its left color; keep its own
+  // name only while it stays in the same category.
+  const categoryFor = (color) => categoryName(color, p.id) || (categoryKey(color) === categoryKey(p.color) ? p.category || '' : '');
   const updatePreview = () => {
     el('#pf-preview').style.background = projectSwatchCss({ color: leftColor, color2: rightColor });
+    const cat = categoryFor(leftColor);
+    el('#pf-category').textContent = cat ? `· ${cat}` : '· unnamed category';
   };
   function renderSwatches() {
     el('#pf-colors-left').innerHTML =
@@ -998,6 +1075,7 @@ function openProjectModal(project) {
       name,
       color: leftColor,
       color2: rightColor || null,
+      category: categoryFor(leftColor) || null,
       archived: p.archived || false,
       createdAt: p.id ? p.createdAt : Date.now(),
       updatedAt: Date.now(),
