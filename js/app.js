@@ -28,6 +28,25 @@ function categoryName(color, exceptId = null) {
   return named ? named.category : '';
 }
 
+// Splits projects into categories: named ones first, alphabetically, then
+// unnamed ones (ordered by their first project); projects A-Z inside each,
+// archived ones last. Shared by the Timer and Projects tabs.
+function groupByCategory(projects) {
+  const groups = new Map();
+  for (const p of projects) {
+    const key = categoryKey(p.color);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  }
+  return [...groups.entries()]
+    .map(([key, members]) => ({
+      key,
+      name: categoryName(key),
+      projects: members.sort((a, b) => (!!a.archived - !!b.archived) || a.name.localeCompare(b.name)),
+    }))
+    .sort((a, b) => (!a.name - !b.name) || a.name.localeCompare(b.name) || a.projects[0].name.localeCompare(b.projects[0].name));
+}
+
 const state = {
   projects: [],
   projectsById: new Map(), // kept in sync with `projects` on every reload(), for O(1) lookups
@@ -185,15 +204,22 @@ function renderTimer() {
     grid.innerHTML = '<p class="hint-text">No projects yet. Add one in the Projects tab.</p>';
   }
   const selectionLocked = !!(state.running || state.pendingProjectId);
-  for (const p of active) {
-    const btn = document.createElement('button');
-    btn.className = 'project-tile';
-    btn.style.background = projectSwatchCss(p);
-    btn.textContent = p.name;
-    btn.disabled = selectionLocked;
-    if (btn.disabled) btn.style.opacity = '0.5';
-    btn.addEventListener('click', () => selectProject(p.id));
-    grid.appendChild(btn);
+  // Tiles grouped by category, each group under a full-width label.
+  for (const group of groupByCategory(active)) {
+    const label = document.createElement('div');
+    label.className = 'tile-category';
+    label.innerHTML = `<span class="category-dot" style="background:${group.key}"></span><span class="category-name${group.name ? '' : ' unnamed'}">${group.name ? escapeHtml(group.name) : 'Unnamed category'}</span>`;
+    grid.appendChild(label);
+    for (const p of group.projects) {
+      const btn = document.createElement('button');
+      btn.className = 'project-tile';
+      btn.style.background = projectSwatchCss(p);
+      btn.textContent = p.name;
+      btn.disabled = selectionLocked;
+      if (btn.disabled) btn.style.opacity = '0.5';
+      btn.addEventListener('click', () => selectProject(p.id));
+      grid.appendChild(btn);
+    }
   }
 }
 
@@ -516,20 +542,7 @@ function renderProjects() {
     listEl.innerHTML = '<p class="hint-text">No projects yet.</p>';
     return;
   }
-  // Group by category (left color). Named categories first, alphabetically,
-  // then unnamed ones; inside each, active projects A-Z, archived ones last.
-  const groups = new Map();
-  for (const p of state.projects) {
-    const key = categoryKey(p.color);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(p);
-  }
-  const ordered = [...groups.entries()]
-    .map(([key, projects]) => ({ key, name: categoryName(key), projects }))
-    .sort((a, b) => (!a.name - !b.name) || a.name.localeCompare(b.name) || a.projects[0].name.localeCompare(b.projects[0].name));
-
-  for (const group of ordered) {
-    group.projects.sort((a, b) => (!!a.archived - !!b.archived) || a.name.localeCompare(b.name));
+  for (const group of groupByCategory(state.projects)) {
     const section = document.createElement('div');
     section.className = 'category-group';
     section.innerHTML = `
