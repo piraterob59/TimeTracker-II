@@ -106,6 +106,10 @@ html, body {
 
 .full { width: 100%; margin-bottom: 14px; }
 
+/* Two full-width buttons side by side, e.g. View sync settings | Disconnect sync */
+.btn-row { display: flex; gap: 10px; margin-bottom: 14px; }
+.btn-row .btn { flex: 1; min-width: 0; }
+
 .idle-hint {
   color: var(--text-dim);
   text-align: center;

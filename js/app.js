@@ -723,6 +723,40 @@ function openSyncModal() {
   });
 }
 
+// Read-only view of the Firebase config this device is syncing with, so it
+// can be checked or copied to set up sync on another device.
+function openSyncSettingsModal() {
+  const config = getConfig();
+  const status = syncStatus();
+  const json = config ? JSON.stringify(config, null, 2) : '';
+  openModal(`
+    <h2>Sync settings</h2>
+    <p class="hint-text">Signed in as <strong>${escapeHtml(status.email || 'unknown account')}</strong>${config && config.projectId ? ` · Firebase project <strong>${escapeHtml(config.projectId)}</strong>` : ''}.</p>
+    <div class="field">
+      <label>Firebase config in use on this device</label>
+      <textarea id="ss-config" rows="9" readonly>${escapeHtml(json || 'No saved config found.')}</textarea>
+    </div>
+    <p class="hint-text">To sync another device, paste this into Settings → Set up cloud sync there, then sign in with the same Google account.</p>
+    <p class="hint-text" id="ss-status"></p>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="ss-close">Close</button>
+      <button class="btn" id="ss-copy" ${json ? '' : 'disabled'}>Copy</button>
+    </div>
+  `);
+  const textarea = el('#ss-config');
+  el('#ss-close').addEventListener('click', closeModal);
+  el('#ss-copy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(json);
+      el('#ss-status').textContent = 'Copied to clipboard.';
+    } catch {
+      textarea.focus();
+      textarea.select();
+      el('#ss-status').textContent = 'Could not access the clipboard — text is selected, copy it manually.';
+    }
+  });
+}
+
 function openStartAtModal() {
   if (!state.running) return;
   const startDate = new Date(state.running.start);
@@ -1172,6 +1206,7 @@ el('#export-data-btn').addEventListener('click', openExportModal);
 el('#import-data-btn').addEventListener('click', openImportModal);
 
 el('#sync-setup-btn').addEventListener('click', openSyncModal);
+el('#sync-view-btn').addEventListener('click', openSyncSettingsModal);
 el('#sync-signout-btn').addEventListener('click', async () => {
   await disconnectSync();
   renderSyncStatus();
