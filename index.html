@@ -46,7 +46,7 @@
       <div id="project-grid" class="project-grid"></div>
     </section>
 
-    <section id="view-history" class="view">
+    <section id="view-today" class="view">
       <div class="totals-row">
         <div class="total-box">
           <div class="total-label">Today</div>
@@ -58,6 +58,11 @@
         </div>
       </div>
 
+      <button id="add-entry-btn" class="btn btn-secondary full">+ Add manual entry</button>
+      <div id="history-list" class="history-list"></div>
+    </section>
+
+    <section id="view-history" class="view">
       <div id="week-chart-card" class="week-chart-card hidden">
         <div class="week-chart-header">
           <div class="section-title" style="margin:0">Minutes per day</div>
@@ -70,9 +75,7 @@
         <div id="week-chart"></div>
         <div id="week-chart-legend" class="chart-legend"></div>
       </div>
-
-      <button id="add-entry-btn" class="btn btn-secondary full">+ Add manual entry</button>
-      <div id="history-list" class="history-list"></div>
+      <p id="week-chart-empty" class="hint-text">No time recorded yet.</p>
     </section>
 
     <section id="view-projects" class="view">
@@ -106,8 +109,11 @@
     <button class="tab-btn active" data-view="timer">
       <span class="tab-icon">⏱</span><span>Timer</span>
     </button>
+    <button class="tab-btn" data-view="today">
+      <span class="tab-icon">📋</span><span>Today</span>
+    </button>
     <button class="tab-btn" data-view="history">
-      <span class="tab-icon">📋</span><span>History</span>
+      <span class="tab-icon">📊</span><span>History</span>
     </button>
     <button class="tab-btn" data-view="projects">
       <span class="tab-icon">📁</span><span>Projects</span>

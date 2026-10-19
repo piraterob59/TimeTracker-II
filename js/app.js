@@ -441,6 +441,8 @@ function renderWeekChart(completed, chartStart) {
   // Hide the whole card (nav included) only when there's no history to page
   // through at all — otherwise keep navigation available even for a range
   // with no entries, so paging further back still works.
+  // The History tab holds only this card, so say why it's blank instead.
+  el('#week-chart-empty').classList.toggle('hidden', completed.length > 0);
   if (completed.length === 0) {
     card.classList.add('hidden');
     chartEl.innerHTML = '';
@@ -1259,7 +1261,7 @@ function switchView(view) {
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
   el(`#view-${view}`).classList.add('active');
   document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
-  const titles = { timer: 'Timer', history: 'History', projects: 'Projects', settings: 'Settings' };
+  const titles = { timer: 'Timer', today: 'Today', history: 'History', projects: 'Projects', settings: 'Settings' };
   el('#page-title').textContent = titles[view];
 }
 
