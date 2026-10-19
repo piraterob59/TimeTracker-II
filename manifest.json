@@ -1,6 +1,6 @@
 {
-  "name": "TimeTracker",
-  "short_name": "TimeTracker",
+  "name": "TT",
+  "short_name": "TT",
   "description": "Track time spent on your projects.",
   "start_url": "./index.html",
   "scope": "./",
