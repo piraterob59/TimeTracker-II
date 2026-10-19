@@ -669,6 +669,8 @@ function selectProject(projectId) {
   if (state.running || state.pendingProjectId) return;
   state.pendingProjectId = projectId;
   renderTimer();
+  // The Start card sits above the tiles, so bring it into view.
+  el('#views').scrollTop = 0;
 }
 
 async function beginRunning() {
