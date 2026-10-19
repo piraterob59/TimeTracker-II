@@ -289,17 +289,42 @@ html, body {
 
 #week-chart svg {
   width: 100%;
-  height: auto;
+  height: 100%;
   display: block;
+}
+
+/* History tab: the chart card stretches to fill the screen below the title. */
+#view-history.active {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+#view-history .week-chart-card {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-bottom: 0;
+}
+
+#view-history #week-chart {
+  flex: 1 1 auto;
+  min-height: 200px;
+  position: relative;
+}
+
+/* Taken out of flow so the drawing can't push its own box taller. */
+#view-history #week-chart svg {
+  position: absolute;
+  inset: 0;
 }
 
 .chart-legend {
   display: flex;
-  flex-wrap: nowrap;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 8px 16px;
   padding: 10px 2px 12px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
 }
 
 .chart-legend-item {

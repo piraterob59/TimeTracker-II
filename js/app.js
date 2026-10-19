@@ -494,8 +494,11 @@ function renderWeekChart(completed, chartStart) {
   const dayTotals = perDay.map((map) => [...map.values()].reduce((a, b) => a + b, 0));
   const maxTotal = Math.max(1, ...dayTotals);
 
-  const width = 700;
-  const height = 260;
+  // Drawn in real pixels at the chart area's size, which fills the History
+  // tab's remaining height. While the tab is hidden it measures 0, so fall
+  // back to a default; switchView redraws once it's visible.
+  const width = chartEl.clientWidth || 700;
+  const height = Math.max(chartEl.clientHeight || 260, 200);
   const padTop = 16;
   const padBottom = 28;
   const padSide = 12;
@@ -1263,7 +1266,12 @@ function switchView(view) {
   document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
   const titles = { timer: 'Timer', today: 'Today', history: 'History', projects: 'Projects', settings: 'Settings' };
   el('#page-title').textContent = titles[view];
+  if (view === 'history') renderHistory();
 }
+
+window.addEventListener('resize', () => {
+  if (state.view === 'history') renderHistory();
+});
 
 document.querySelectorAll('.tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchView(btn.dataset.view));
