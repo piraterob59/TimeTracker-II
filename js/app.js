@@ -86,20 +86,32 @@ const groupPoints = (row, g) => Math.min(g.max, Math.max(0, (row && row.values &
 const pointsTotal = (p, row) => pointGroupsOf(p).reduce((sum, g) => sum + groupPoints(row, g), 0);
 const defaultPointGroups = () => ['Breakfast', 'Lunch', 'Dinner'].map((name) => ({ id: uuid(), name, max: 3 }));
 
-// Every install comes with a Diet points project (3 meals, 3 points each) so
+// Every install comes with a Meals points project (3 meals, 3 points each) so
 // there's a meals score on the Today tab every day. Its ids are fixed, so
 // devices that each create it before syncing end up with the same project.
 // Made once per device: if it's deleted it stays deleted (archive hides it).
+// It was first called "Diet" (id 'diet', kept so devices still agree); that
+// name is changed to Meals once per device.
 const DEFAULT_DIET_FLAG = 'tt_default_diet_created';
+const MEALS_RENAME_FLAG = 'tt_default_diet_renamed_meals';
 async function ensureDefaultDiet() {
   try {
+    if (!localStorage.getItem(MEALS_RENAME_FLAG)) {
+      const old = state.projects.find((p) => p.id === 'diet' && p.name === 'Diet');
+      if (old) {
+        const renamed = { ...old, name: 'Meals', updatedAt: Date.now() };
+        await saveProject(renamed);
+        state.projects = state.projects.map((p) => (p.id === 'diet' ? renamed : p));
+      }
+      localStorage.setItem(MEALS_RENAME_FLAG, '1');
+    }
     if (localStorage.getItem(DEFAULT_DIET_FLAG)) return;
   } catch { return; }
-  if (!state.projects.some((p) => p.id === 'diet' || p.name.trim().toLowerCase() === 'diet')) {
+  if (!state.projects.some((p) => p.id === 'diet' || ['diet', 'meals'].includes(p.name.trim().toLowerCase()))) {
     const personal = state.categories.find((c) => c.name.toLowerCase() === 'personal');
     const project = {
       id: 'diet',
-      name: 'Diet',
+      name: 'Meals',
       kind: 'points',
       pointGroups: ['Breakfast', 'Lunch', 'Dinner'].map((name) => ({ id: name.toLowerCase(), name, max: 3 })),
       // Without a Personal category, normalizeProjects() files it by color.
