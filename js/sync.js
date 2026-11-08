@@ -15,6 +15,7 @@ let onRemoteChangeCb = null;
 let unsubProjects = null;
 let unsubEntries = null;
 let unsubCategories = null;
+let unsubPoints = null;
 
 export function getConfig() {
   try {
@@ -152,6 +153,8 @@ function stopListening() {
   if (unsubProjects) unsubProjects();
   if (unsubEntries) unsubEntries();
   if (unsubCategories) unsubCategories();
+  if (unsubPoints) unsubPoints();
+  unsubPoints = null;
   unsubProjects = null;
   unsubEntries = null;
   unsubCategories = null;
@@ -186,6 +189,10 @@ function startListening() {
     put: (c) => localStore.putCategory(c),
     del: (id) => localStore.deleteCategory(id),
   });
+  unsubPoints = subscribeCollection('points', {
+    put: (r) => localStore.putPoints(r),
+    del: (id) => localStore.deletePoints(id),
+  });
   unsubEntries = subscribeCollection('entries', {
     put: (e) => localStore.putEntry(e),
     del: (id) => localStore.deleteEntry(id),
@@ -195,12 +202,14 @@ function startListening() {
 async function uploadLocalDataOnce(uid) {
   const flagKey = `tt_sync_uploaded_${uid}`;
   if (localStorage.getItem(flagKey)) return;
-  const [projects, entries, categories] = await Promise.all([
+  const [projects, entries, categories, points] = await Promise.all([
     localStore.getAllProjects(),
     localStore.getAllEntries(),
     localStore.getAllCategories(),
+    localStore.getAllPoints(),
   ]);
   await Promise.all([
+    ...points.map((r) => _fsMod.setDoc(userDoc('points', r.id), r, { merge: true })),
     ...categories.map((c) => _fsMod.setDoc(userDoc('categories', c.id), c, { merge: true })),
     ...projects.map((p) => _fsMod.setDoc(userDoc('projects', p.id), p, { merge: true })),
     ...entries.map((e) => _fsMod.setDoc(userDoc('entries', e.id), e, { merge: true })),
@@ -286,6 +295,14 @@ export function pushCategory(category) {
 
 export function pushDeleteCategory(id) {
   return pushDeleteDoc('categories', id);
+}
+
+export function pushPoints(row) {
+  return pushDoc('points', row);
+}
+
+export function pushDeletePoints(id) {
+  return pushDeleteDoc('points', id);
 }
 
 export function pushEntry(entry) {

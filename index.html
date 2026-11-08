@@ -47,6 +47,17 @@
     </section>
 
     <section id="view-today" class="view">
+      <div id="points-card" class="points-card hidden">
+        <div class="week-chart-header">
+          <div class="section-title" style="margin:0">Points</div>
+          <div class="week-nav">
+            <button id="points-prev-btn" class="icon-btn" aria-label="Previous day">‹</button>
+            <span id="points-date-label" class="week-range-label"></span>
+            <button id="points-next-btn" class="icon-btn" aria-label="Next day">›</button>
+          </div>
+        </div>
+        <div id="points-list"></div>
+      </div>
       <div class="totals-row">
         <div class="total-box">
           <div class="total-label">Today</div>
@@ -76,6 +87,10 @@
         <div id="week-chart-legend" class="chart-legend"></div>
       </div>
       <p id="week-chart-empty" class="hint-text">No time recorded yet.</p>
+      <div id="points-week-card" class="points-card hidden">
+        <div class="section-title" style="margin:0 0 8px">Points per day</div>
+        <div id="points-week"></div>
+      </div>
     </section>
 
     <section id="view-projects" class="view">

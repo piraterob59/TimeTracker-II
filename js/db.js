@@ -4,7 +4,7 @@
 // rest of the app can just `await store.getAllProjects()` etc.
 
 const DB_NAME = 'timetracker';
-const DB_VERSION = 2; // bump this + add an onupgradeneeded branch if the schema ever changes (2: categories)
+const DB_VERSION = 3; // bump this + add an onupgradeneeded branch if the schema ever changes (2: categories, 3: points)
 
 // Opens (or creates) the database and returns a Promise of the connection.
 // `onupgradeneeded` only fires the very first time a browser opens this
@@ -31,6 +31,11 @@ function openDB() {
       // projects belong to via `categoryId`.
       if (!db.objectStoreNames.contains('categories')) {
         db.createObjectStore('categories', { keyPath: 'id' });
+      }
+      // Added in version 3: daily scores for points projects, one row per
+      // project per day, id `${projectId}_${YYYY-MM-DD}`.
+      if (!db.objectStoreNames.contains('points')) {
+        db.createObjectStore('points', { keyPath: 'id' }).createIndex('projectId', 'projectId');
       }
       if (!db.objectStoreNames.contains('meta')) {
         db.createObjectStore('meta', { keyPath: 'key' });
@@ -106,24 +111,25 @@ class Store {
     return txDone(t, project);
   }
 
-  // Deletes a project and cascades the delete to every entry that
-  // belongs to it, using the 'projectId' index to find them.
+  // Deletes a project and cascades the delete to every entry and points
+  // row that belongs to it, using their 'projectId' indexes to find them.
   async deleteProject(id) {
     const db = await this.db();
-    const t = tx(db, ['projects', 'entries'], 'readwrite');
+    const t = tx(db, ['projects', 'entries', 'points'], 'readwrite');
     t.objectStore('projects').delete(id);
-    const idx = t.objectStore('entries').index('projectId');
     const range = IDBKeyRange.only(id);
-    // A cursor walks matching rows one at a time (rather than loading them
-    // all into memory first) — call .continue() after each delete to
-    // advance to the next matching entry until the cursor runs out.
-    idx.openCursor(range).onsuccess = (e) => {
-      const cursor = e.target.result;
-      if (cursor) {
-        cursor.delete();
-        cursor.continue();
-      }
-    };
+    for (const name of ['entries', 'points']) {
+      // A cursor walks matching rows one at a time (rather than loading them
+      // all into memory first) — call .continue() after each delete to
+      // advance to the next matching row until the cursor runs out.
+      t.objectStore(name).index('projectId').openCursor(range).onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (cursor) {
+          cursor.delete();
+          cursor.continue();
+        }
+      };
+    }
     return txDone(t);
   }
 
@@ -145,6 +151,26 @@ class Store {
     const db = await this.db();
     const t = tx(db, 'categories', 'readwrite');
     t.objectStore('categories').delete(id);
+    return txDone(t);
+  }
+
+  async getAllPoints() {
+    const db = await this.db();
+    const t = tx(db, 'points', 'readonly');
+    return reqToPromise(t.objectStore('points').getAll());
+  }
+
+  async putPoints(row) {
+    const db = await this.db();
+    const t = tx(db, 'points', 'readwrite');
+    t.objectStore('points').put(row);
+    return txDone(t, row);
+  }
+
+  async deletePoints(id) {
+    const db = await this.db();
+    const t = tx(db, 'points', 'readwrite');
+    t.objectStore('points').delete(id);
     return txDone(t);
   }
 

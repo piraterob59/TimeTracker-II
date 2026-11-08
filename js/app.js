@@ -1,5 +1,5 @@
 import { store, uuid } from './db.js';
-import { syncStatus, initSync, getConfig, parseConfigText, connectWithConfig, disconnectSync, pushProject, pushEntry, pushDeleteProject, pushDeleteEntry, pushCategory, pushDeleteCategory } from './sync.js';
+import { syncStatus, initSync, getConfig, parseConfigText, connectWithConfig, disconnectSync, pushProject, pushEntry, pushDeleteProject, pushDeleteEntry, pushCategory, pushDeleteCategory, pushPoints, pushDeletePoints } from './sync.js';
 
 const PROJECT_COLORS = [
   '#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed',
@@ -72,7 +72,23 @@ async function normalizeProjects() {
   return changed;
 }
 
+// A project either tracks time (the default) or, with kind 'points', a daily
+// score: `pointGroups` is a list of { id, name, max } (Diet: Breakfast,
+// Lunch, Dinner, 3 each). Each day's score is one row in `points`,
+// { id: `${projectId}_${date}`, projectId, date, values: { groupId: n } };
+// the id is per project per day so devices editing the same day share a row.
+const isPointsProject = (p) => !!p && p.kind === 'points';
+const pointGroupsOf = (p) => (isPointsProject(p) && Array.isArray(p.pointGroups) ? p.pointGroups : []);
+const pointsMax = (p) => pointGroupsOf(p).reduce((sum, g) => sum + g.max, 0);
+const pointsRowId = (projectId, date) => `${projectId}_${date}`;
+const pointsRow = (projectId, date) => state.points.find((r) => r.id === pointsRowId(projectId, date)) || null;
+const groupPoints = (row, g) => Math.min(g.max, Math.max(0, (row && row.values && row.values[g.id]) || 0));
+const pointsTotal = (p, row) => pointGroupsOf(p).reduce((sum, g) => sum + groupPoints(row, g), 0);
+const defaultPointGroups = () => ['Breakfast', 'Lunch', 'Dinner'].map((name) => ({ id: uuid(), name, max: 3 }));
+
 const state = {
+  points: [],
+  pointsDate: null, // day shown in Today's points card (YYYY-MM-DD); null = today
   categories: [],
   projects: [],
   projectsById: new Map(), // kept in sync with `projects` on every reload(), for O(1) lookups
@@ -156,6 +172,7 @@ async function reload() {
   if (await normalizeProjects()) state.projects = await store.getAllProjects();
   state.projectsById = new Map(state.projects.map((p) => [p.id, p]));
   state.entries = await store.getAllEntries();
+  state.points = await store.getAllPoints();
   state.running = state.entries.find((e) => e.end === null) || null;
   renderAll();
   syncAppBadge();
@@ -179,6 +196,7 @@ function syncAppBadge() {
 
 function renderAll() {
   renderTimer();
+  renderPointsToday();
   renderHistory();
   renderProjects();
   renderSyncStatus();
@@ -226,7 +244,8 @@ function renderTimer() {
     idleHint.classList.remove('hidden');
   }
 
-  const active = state.projects.filter((p) => !p.archived);
+  // Points projects have nothing to time; they're scored on the Today tab.
+  const active = state.projects.filter((p) => !p.archived && !isPointsProject(p));
   grid.innerHTML = '';
   if (active.length === 0) {
     grid.innerHTML = '<p class="hint-text">No projects yet. Add one in the Projects tab.</p>';
@@ -391,6 +410,7 @@ function renderHistory() {
   chartStart.setHours(0, 0, 0, 0);
   chartStart.setDate(chartStart.getDate() - 6 - state.chartOffsetWeeks * 7);
   renderWeekChart(completed, chartStart.getTime());
+  renderPointsWeek(chartStart.getTime());
 
   const groups = new Map();
   for (const e of completed) {
@@ -435,6 +455,108 @@ function renderHistory() {
     }
     listEl.appendChild(groupEl);
   }
+}
+
+// Active points projects in category order, as on the Projects tab.
+function activePointsProjects() {
+  return groupByCategory(state.projects.filter((p) => isPointsProject(p) && !p.archived)).flatMap((g) => g.projects);
+}
+
+const shiftDateKey = (key, days) => {
+  const d = new Date(key + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return fmtDateKey(d.toISOString());
+};
+
+// Today tab: one block per points project for the chosen day, each group a
+// row of dots. Tapping dot k sets that group to k points; tapping the last
+// filled dot takes one away (so a single tap can also clear a group).
+function renderPointsToday() {
+  const projects = activePointsProjects();
+  el('#points-card').classList.toggle('hidden', projects.length === 0);
+  if (projects.length === 0) return;
+  const todayKey = fmtDateKey(new Date().toISOString());
+  const date = state.pointsDate && state.pointsDate < todayKey ? state.pointsDate : todayKey;
+  el('#points-date-label').textContent = fmtDateHeading(date);
+  el('#points-next-btn').disabled = date >= todayKey;
+  el('#points-list').innerHTML = projects.map((p) => {
+    const row = pointsRow(p.id, date);
+    return `
+      <div class="points-project">
+        <div class="points-project-head">
+          <span class="entry-color" style="background:${projectSwatchCss(p)}"></span>
+          <span class="points-project-name">${escapeHtml(p.name)}</span>
+          <span class="points-total">${pointsTotal(p, row)} / ${pointsMax(p)}</span>
+        </div>
+        ${pointGroupsOf(p).map((g) => {
+          const v = groupPoints(row, g);
+          return `
+            <div class="points-group">
+              <span class="points-group-name">${escapeHtml(g.name)}</span>
+              <span class="points-dots">${Array.from({ length: g.max }, (_, i) => `<button type="button" class="points-dot${i < v ? ' filled' : ''}" data-project="${p.id}" data-group="${g.id}" data-n="${i + 1}" aria-label="${escapeHtml(g.name)} ${i + 1} point${i ? 's' : ''}"></button>`).join('')}</span>
+            </div>`;
+        }).join('')}
+      </div>`;
+  }).join('');
+}
+
+async function tapPointsDot(btn) {
+  const p = projectById(btn.dataset.project);
+  const g = pointGroupsOf(p).find((x) => x.id === btn.dataset.group);
+  if (!g) return;
+  const todayKey = fmtDateKey(new Date().toISOString());
+  const date = state.pointsDate && state.pointsDate < todayKey ? state.pointsDate : todayKey;
+  const row = pointsRow(p.id, date);
+  const n = Number(btn.dataset.n);
+  const next = groupPoints(row, g) === n ? n - 1 : n;
+  const updated = {
+    id: pointsRowId(p.id, date),
+    projectId: p.id,
+    date,
+    values: { ...(row ? row.values : {}), [g.id]: next },
+    updatedAt: Date.now(),
+  };
+  // Applied to state and redrawn directly instead of via reload(): quick
+  // successive taps each see the previous one's result, and a reload landing
+  // between two taps can't roll the first back. IndexedDB runs the writes
+  // in the order they were made.
+  state.points = [...state.points.filter((r) => r.id !== updated.id), updated];
+  renderPointsToday();
+  renderHistory();
+  await savePoints(updated);
+}
+
+// History tab: each points project's daily score over the same 7 days as the
+// minutes chart, as a small bar per day. Tapping a day opens it on Today.
+function renderPointsWeek(chartStart) {
+  const projects = activePointsProjects();
+  el('#points-week-card').classList.toggle('hidden', projects.length === 0);
+  if (projects.length === 0) return;
+  const todayKey = fmtDateKey(new Date().toISOString());
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(chartStart);
+    d.setDate(d.getDate() + i);
+    return { key: fmtDateKey(d.toISOString()), label: d.toLocaleDateString([], { weekday: 'short' }) };
+  });
+  el('#points-week').innerHTML = projects.map((p) => {
+    const max = pointsMax(p) || 1;
+    return `
+      <div class="points-week-row">
+        <div class="points-week-name"><span class="category-dot" style="background:${projectSwatchCss(p)}"></span>${escapeHtml(p.name)}</div>
+        <div class="points-week-days">
+          ${days.map((d) => {
+            const row = pointsRow(p.id, d.key);
+            const total = pointsTotal(p, row);
+            return `
+              <button type="button" class="points-week-day${d.key === todayKey ? ' today' : ''}" data-date="${d.key}" ${d.key > todayKey ? 'disabled' : ''}>
+                <span class="points-week-bar"><span style="height:${(total / max) * 100}%;background:${projectSwatchCss(p)}"></span></span>
+                <span class="points-week-score">${row ? total : '–'}</span>
+                <span class="points-week-label">${d.label}</span>
+              </button>`;
+          }).join('')}
+        </div>
+      </div>`;
+  }).join('');
 }
 
 function renderWeekChart(completed, chartStart) {
@@ -603,7 +725,7 @@ function renderProjects() {
       row.className = 'project-row';
       row.innerHTML = `
         <div class="entry-color" style="background:${projectSwatchCss(p)}"></div>
-        <div class="project-row-name">${escapeHtml(p.name)}${p.archived ? ' (archived)' : ''}</div>
+        <div class="project-row-name">${escapeHtml(p.name)}${p.archived ? ' (archived)' : ''}${isPointsProject(p) ? `<span class="points-badge">${pointsMax(p)} pts/day</span>` : ''}</div>
         <button class="icon-btn" data-action="edit">✏️</button>
         <button class="icon-btn" data-action="delete">🗑</button>
       `;
@@ -745,6 +867,11 @@ async function saveProject(project) {
   pushProject(project);
 }
 
+async function savePoints(row) {
+  await store.putPoints(row);
+  pushPoints(row);
+}
+
 async function saveCategory(category) {
   await store.putCategory(category);
   pushCategory(category);
@@ -828,13 +955,17 @@ async function setRunningStart(newStart) {
 
 async function confirmDeleteProject(project) {
   const has = state.entries.some((e) => e.projectId === project.id);
+  const pointRows = state.points.filter((r) => r.projectId === project.id);
   const msg = has
     ? `Delete "${project.name}" and all its time entries? This can't be undone.`
-    : `Delete "${project.name}"?`;
+    : pointRows.length
+      ? `Delete "${project.name}" and all its recorded points? This can't be undone.`
+      : `Delete "${project.name}"?`;
   const ok = await openConfirm(msg);
   if (ok) {
     await store.deleteProject(project.id);
     pushDeleteProject(project.id);
+    for (const r of pointRows) pushDeletePoints(r.id);
     await reload();
   }
 }
@@ -1025,6 +1156,7 @@ function openExportModal() {
     categories: state.categories,
     projects: state.projects,
     entries: state.entries,
+    points: state.points,
   };
   const json = JSON.stringify(payload, null, 2);
   openModal(`
@@ -1082,6 +1214,7 @@ function openImportModal() {
     // Older exports have no categories; reload() then makes them from colors.
     for (const c of Array.isArray(payload.categories) ? payload.categories : []) await saveCategory(c);
     for (const p of payload.projects) await saveProject(p);
+    for (const r of Array.isArray(payload.points) ? payload.points : []) await savePoints(r);
     for (const e of payload.entries) await saveEntry(e);
     closeModal();
     await reload();
@@ -1101,6 +1234,8 @@ function openProjectModal(project, categoryId = null) {
   let catId = categoryById(p.categoryId) ? p.categoryId : (categoryId || categories[0].id);
   const leftColor = () => categoryKey(categoryById(catId).color);
   let rightColor = isHexColor(p.color2) ? p.color2.toLowerCase() : null;
+  let kind = isPointsProject(p) ? 'points' : 'time';
+  const groups = pointGroupsOf(p).length ? pointGroupsOf(p).map((g) => ({ ...g })) : defaultPointGroups();
   // The presets plus every color already in use, so a custom color picked
   // once shows up as a swatch for the others too.
   const palette = [...new Set([
@@ -1121,6 +1256,19 @@ function openProjectModal(project, categoryId = null) {
         ${categories.map((c) => `<button type="button" class="category-choice" data-id="${c.id}"><span class="category-dot" style="background:${categoryKey(c.color)}"></span>${c.name ? escapeHtml(c.name) : '<em>Unnamed category</em>'}</button>`).join('')}
       </div>
     </div>
+    <div class="field">
+      <label>Tracks</label>
+      <div class="category-picker" id="pf-kind">
+        <button type="button" class="category-choice" data-kind="time">⏱ Time</button>
+        <button type="button" class="category-choice" data-kind="points">● Points</button>
+      </div>
+    </div>
+    <div class="field" id="pf-points-field">
+      <label>Point groups <span class="points-max-label" id="pf-points-max"></span></label>
+      <div id="pf-groups"></div>
+      <button type="button" class="btn btn-secondary" id="pf-add-group">+ Add group</button>
+    </div>
+    <p class="hint-text" id="pf-error"></p>
     <div class="field">
       <label>Color <span class="color-preview" id="pf-preview"></span></label>
       <div class="color-field-label">Left half comes from the category. Right half &mdash; this project:</div>
@@ -1146,6 +1294,46 @@ function openProjectModal(project, categoryId = null) {
     updatePreview();
   }
   renderSwatches();
+
+  // Group names and maxima are read from the inputs as they change, so typing
+  // doesn't re-render (and lose focus); adding or removing a group does.
+  const updatePointsMax = () => {
+    el('#pf-points-max').textContent = `· up to ${groups.reduce((sum, g) => sum + g.max, 0)} a day`;
+  };
+  const renderGroups = () => {
+    for (const b of document.querySelectorAll('#pf-kind .category-choice')) b.classList.toggle('selected', b.dataset.kind === kind);
+    el('#pf-points-field').classList.toggle('hidden', kind !== 'points');
+    el('#pf-groups').innerHTML = groups.map((g, i) => `
+      <div class="points-group-edit" data-i="${i}">
+        <input type="text" class="pg-name" value="${escapeHtml(g.name)}" placeholder="e.g. Breakfast" />
+        <input type="number" class="pg-max" min="1" max="9" value="${g.max}" aria-label="Maximum points" />
+        <button type="button" class="icon-btn pg-remove" title="Remove group">✕</button>
+      </div>`).join('');
+    updatePointsMax();
+  };
+  renderGroups();
+  el('#pf-kind').addEventListener('click', (e) => {
+    const b = e.target.closest('.category-choice');
+    if (!b) return;
+    kind = b.dataset.kind;
+    renderGroups();
+  });
+  el('#pf-groups').addEventListener('input', (e) => {
+    const g = groups[Number(e.target.closest('.points-group-edit').dataset.i)];
+    if (e.target.matches('.pg-name')) g.name = e.target.value;
+    if (e.target.matches('.pg-max')) g.max = Math.min(9, Math.max(1, Math.round(Number(e.target.value)) || 1));
+    updatePointsMax();
+  });
+  el('#pf-groups').addEventListener('click', (e) => {
+    if (!e.target.matches('.pg-remove')) return;
+    groups.splice(Number(e.target.closest('.points-group-edit').dataset.i), 1);
+    renderGroups();
+  });
+  el('#pf-add-group').addEventListener('click', () => {
+    groups.push({ id: uuid(), name: '', max: 3 });
+    renderGroups();
+    el('#pf-groups .points-group-edit:last-child .pg-name').focus();
+  });
 
   el('#pf-categories').addEventListener('click', (e) => {
     const b = e.target.closest('.category-choice');
@@ -1188,9 +1376,16 @@ function openProjectModal(project, categoryId = null) {
   el('#pf-save').addEventListener('click', async () => {
     const name = el('#pf-name').value.trim();
     if (!name) { el('#pf-name').focus(); return; }
+    const pointGroups = groups.map((g) => ({ ...g, name: g.name.trim() }));
+    if (kind === 'points' && (pointGroups.length === 0 || pointGroups.some((g) => !g.name))) {
+      el('#pf-error').textContent = pointGroups.length ? 'Give every point group a name.' : 'Add at least one point group.';
+      return;
+    }
     const updated = {
       id: p.id || uuid(),
       name,
+      kind,
+      pointGroups: kind === 'points' ? pointGroups : null,
       categoryId: catId,
       color: leftColor(),
       color2: rightColor || null,
@@ -1217,12 +1412,13 @@ function openEntryModal(entry) {
   const isEdit = !!entry;
   const e = entry || {
     id: null,
-    projectId: state.projects.find((p) => !p.archived)?.id || '',
+    projectId: state.projects.find((p) => !p.archived && !isPointsProject(p))?.id || '',
     start: new Date().toISOString(),
     end: new Date().toISOString(),
     note: '',
   };
   const projectOptions = state.projects
+    .filter((p) => !isPointsProject(p) || p.id === e.projectId)
     .map((p) => `<option value="${p.id}" ${p.id === e.projectId ? 'selected' : ''}>${escapeHtml(p.name)}</option>`)
     .join('');
 
@@ -1394,6 +1590,30 @@ el('#end-at-btn').addEventListener('click', openEndAtModal);
 el('#add-project-btn').addEventListener('click', () => openProjectModal(null));
 el('#add-category-btn').addEventListener('click', () => openCategoryModal(null));
 el('#add-entry-btn').addEventListener('click', () => openEntryModal(null));
+
+el('#points-list').addEventListener('click', (e) => {
+  const btn = e.target.closest('.points-dot');
+  if (btn) tapPointsDot(btn);
+});
+el('#points-prev-btn').addEventListener('click', () => {
+  const todayKey = fmtDateKey(new Date().toISOString());
+  state.pointsDate = shiftDateKey(state.pointsDate || todayKey, -1);
+  renderPointsToday();
+});
+el('#points-next-btn').addEventListener('click', () => {
+  const todayKey = fmtDateKey(new Date().toISOString());
+  const next = shiftDateKey(state.pointsDate || todayKey, 1);
+  state.pointsDate = next >= todayKey ? null : next;
+  renderPointsToday();
+});
+el('#points-week').addEventListener('click', (e) => {
+  const btn = e.target.closest('.points-week-day');
+  if (!btn || btn.disabled) return;
+  const todayKey = fmtDateKey(new Date().toISOString());
+  state.pointsDate = btn.dataset.date >= todayKey ? null : btn.dataset.date;
+  renderPointsToday();
+  switchView('today');
+});
 
 el('#week-prev-btn').addEventListener('click', () => {
   state.chartOffsetWeeks += 1;
