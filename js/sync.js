@@ -14,6 +14,7 @@ let localStore = null;
 let onRemoteChangeCb = null;
 let unsubProjects = null;
 let unsubEntries = null;
+let unsubCategories = null;
 
 export function getConfig() {
   try {
@@ -150,8 +151,10 @@ function userDoc(kind, id) {
 function stopListening() {
   if (unsubProjects) unsubProjects();
   if (unsubEntries) unsubEntries();
+  if (unsubCategories) unsubCategories();
   unsubProjects = null;
   unsubEntries = null;
+  unsubCategories = null;
 }
 
 // Watches one Firestore collection and mirrors remote changes into the
@@ -179,6 +182,10 @@ function startListening() {
     put: (p) => localStore.putProject(p),
     del: (id) => localStore.deleteProject(id),
   });
+  unsubCategories = subscribeCollection('categories', {
+    put: (c) => localStore.putCategory(c),
+    del: (id) => localStore.deleteCategory(id),
+  });
   unsubEntries = subscribeCollection('entries', {
     put: (e) => localStore.putEntry(e),
     del: (id) => localStore.deleteEntry(id),
@@ -188,11 +195,13 @@ function startListening() {
 async function uploadLocalDataOnce(uid) {
   const flagKey = `tt_sync_uploaded_${uid}`;
   if (localStorage.getItem(flagKey)) return;
-  const [projects, entries] = await Promise.all([
+  const [projects, entries, categories] = await Promise.all([
     localStore.getAllProjects(),
     localStore.getAllEntries(),
+    localStore.getAllCategories(),
   ]);
   await Promise.all([
+    ...categories.map((c) => _fsMod.setDoc(userDoc('categories', c.id), c, { merge: true })),
     ...projects.map((p) => _fsMod.setDoc(userDoc('projects', p.id), p, { merge: true })),
     ...entries.map((e) => _fsMod.setDoc(userDoc('entries', e.id), e, { merge: true })),
   ]);
@@ -269,6 +278,14 @@ export function pushProject(project) {
 
 export function pushDeleteProject(id) {
   return pushDeleteDoc('projects', id);
+}
+
+export function pushCategory(category) {
+  return pushDoc('categories', category);
+}
+
+export function pushDeleteCategory(id) {
+  return pushDeleteDoc('categories', id);
 }
 
 export function pushEntry(entry) {

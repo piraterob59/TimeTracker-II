@@ -4,7 +4,7 @@
 // rest of the app can just `await store.getAllProjects()` etc.
 
 const DB_NAME = 'timetracker';
-const DB_VERSION = 1; // bump this + add an onupgradeneeded branch if the schema ever changes
+const DB_VERSION = 2; // bump this + add an onupgradeneeded branch if the schema ever changes (2: categories)
 
 // Opens (or creates) the database and returns a Promise of the connection.
 // `onupgradeneeded` only fires the very first time a browser opens this
@@ -26,6 +26,11 @@ function openDB() {
         // key — e.g. "all entries for project X" — without scanning every row.
         store.createIndex('projectId', 'projectId');
         store.createIndex('start', 'start');
+      }
+      // Added in version 2: categories (name + shared left color) that
+      // projects belong to via `categoryId`.
+      if (!db.objectStoreNames.contains('categories')) {
+        db.createObjectStore('categories', { keyPath: 'id' });
       }
       if (!db.objectStoreNames.contains('meta')) {
         db.createObjectStore('meta', { keyPath: 'key' });
@@ -119,6 +124,27 @@ class Store {
         cursor.continue();
       }
     };
+    return txDone(t);
+  }
+
+  async getAllCategories() {
+    const db = await this.db();
+    const t = tx(db, 'categories', 'readonly');
+    return reqToPromise(t.objectStore('categories').getAll());
+  }
+
+  async putCategory(category) {
+    const db = await this.db();
+    const t = tx(db, 'categories', 'readwrite');
+    t.objectStore('categories').put(category);
+    return txDone(t, category);
+  }
+
+  // Only ever called for empty categories, so nothing cascades.
+  async deleteCategory(id) {
+    const db = await this.db();
+    const t = tx(db, 'categories', 'readwrite');
+    t.objectStore('categories').delete(id);
     return txDone(t);
   }
 

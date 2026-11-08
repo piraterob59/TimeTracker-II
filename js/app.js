@@ -1,5 +1,5 @@
 import { store, uuid } from './db.js';
-import { syncStatus, initSync, getConfig, parseConfigText, connectWithConfig, disconnectSync, pushProject, pushEntry, pushDeleteProject, pushDeleteEntry } from './sync.js';
+import { syncStatus, initSync, getConfig, parseConfigText, connectWithConfig, disconnectSync, pushProject, pushEntry, pushDeleteProject, pushDeleteEntry, pushCategory, pushDeleteCategory } from './sync.js';
 
 const PROJECT_COLORS = [
   '#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed',
@@ -18,36 +18,62 @@ function projectSwatchCss(p) {
   return p && isHexColor(p.color2) ? `linear-gradient(90deg, ${left} 50%, ${p.color2} 50%)` : left;
 }
 
-// Projects sharing a left color form a category. Its name is stored as
-// `category` on every project in it (so it syncs with the projects, with no
-// extra collection); categoryName() reads it from whichever member has it.
+// Categories are their own records ({ id, name, color }) and every project
+// belongs to one via `categoryId`. The category's color is the left half of
+// all its projects' dots. Projects still carry that color as `color` (and the
+// category's name as `category`), kept in step by normalizeProjects(), so the
+// rest of the code and older installs that predate categories keep working.
 const categoryKey = (color) => (isHexColor(color) ? color.toLowerCase() : '#999');
-function categoryName(color, exceptId = null) {
-  const key = categoryKey(color);
-  const named = state.projects.find((q) => q.id !== exceptId && categoryKey(q.color) === key && q.category);
-  return named ? named.category : '';
+// Categories made from projects that predate them get an id derived from
+// their shared left color, so two devices migrating at once agree on it.
+const migratedCategoryId = (color) => `cat-${categoryKey(color).slice(1)}`;
+const categoryById = (id) => state.categories.find((c) => c.id === id) || null;
+const sortedCategories = () =>
+  [...state.categories].sort((a, b) => (!a.name - !b.name) || a.name.localeCompare(b.name));
+
+// Splits projects into categories, ordered A-Z (unnamed ones last); projects
+// A-Z inside each, archived ones last. Projects whose category hasn't arrived
+// (yet) go in a trailing "Uncategorized" group with no `category`. Shared by
+// the Timer and Projects tabs; the Projects tab also lists empty categories.
+function groupByCategory(projects, { includeEmpty = false } = {}) {
+  const byProjectName = (a, b) => (!!a.archived - !!b.archived) || a.name.localeCompare(b.name);
+  const groups = sortedCategories()
+    .map((c) => ({ category: c, key: categoryKey(c.color), name: c.name, projects: projects.filter((p) => p.categoryId === c.id).sort(byProjectName) }))
+    .filter((g) => includeEmpty || g.projects.length > 0);
+  const orphans = projects.filter((p) => !categoryById(p.categoryId)).sort(byProjectName);
+  if (orphans.length) groups.push({ category: null, key: '#999', name: 'Uncategorized', projects: orphans });
+  return groups;
 }
 
-// Splits projects into categories: named ones first, alphabetically, then
-// unnamed ones (ordered by their first project); projects A-Z inside each,
-// archived ones last. Shared by the Timer and Projects tabs.
-function groupByCategory(projects) {
-  const groups = new Map();
-  for (const p of projects) {
-    const key = categoryKey(p.color);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(p);
+// Gives every project a category and keeps its `color`/`category` matching
+// it. Projects from before categories existed are grouped by left color into
+// new categories (named from their old `category` field). Returns whether
+// anything was written, so reload() knows to read the data again.
+async function normalizeProjects() {
+  let changed = false;
+  for (const p of state.projects) {
+    let cat = p.categoryId ? categoryById(p.categoryId) : null;
+    if (!p.categoryId) {
+      const id = migratedCategoryId(p.color);
+      cat = categoryById(id) || state.categories.find((c) => categoryKey(c.color) === categoryKey(p.color));
+      if (!cat) {
+        const name = state.projects.find((q) => !q.categoryId && categoryKey(q.color) === categoryKey(p.color) && q.category)?.category || '';
+        cat = { id, name, color: categoryKey(p.color), createdAt: Date.now(), updatedAt: Date.now() };
+        await saveCategory(cat);
+        state.categories.push(cat);
+      }
+    }
+    if (!cat) continue; // its category is still syncing in; leave it alone
+    if (p.categoryId !== cat.id || categoryKey(p.color) !== categoryKey(cat.color) || (p.category || '') !== cat.name) {
+      await saveProject({ ...p, categoryId: cat.id, color: cat.color, category: cat.name || null, updatedAt: Date.now() });
+      changed = true;
+    }
   }
-  return [...groups.entries()]
-    .map(([key, members]) => ({
-      key,
-      name: categoryName(key),
-      projects: members.sort((a, b) => (!!a.archived - !!b.archived) || a.name.localeCompare(b.name)),
-    }))
-    .sort((a, b) => (!a.name - !b.name) || a.name.localeCompare(b.name) || a.projects[0].name.localeCompare(b.projects[0].name));
+  return changed;
 }
 
 const state = {
+  categories: [],
   projects: [],
   projectsById: new Map(), // kept in sync with `projects` on every reload(), for O(1) lookups
   entries: [],
@@ -125,7 +151,9 @@ function weekStart(date) {
 // ---------- data loading ----------
 
 async function reload() {
+  state.categories = await store.getAllCategories();
   state.projects = await store.getAllProjects();
+  if (await normalizeProjects()) state.projects = await store.getAllProjects();
   state.projectsById = new Map(state.projects.map((p) => [p.id, p]));
   state.entries = await store.getAllEntries();
   state.running = state.entries.find((e) => e.end === null) || null;
@@ -543,11 +571,11 @@ function renderWeekChart(completed, chartStart) {
 function renderProjects() {
   const listEl = el('#projects-list');
   listEl.innerHTML = '';
-  if (state.projects.length === 0) {
-    listEl.innerHTML = '<p class="hint-text">No projects yet.</p>';
+  if (state.projects.length === 0 && state.categories.length === 0) {
+    listEl.innerHTML = '<p class="hint-text">No categories or projects yet.</p>';
     return;
   }
-  for (const group of groupByCategory(state.projects)) {
+  for (const group of groupByCategory(state.projects, { includeEmpty: true })) {
     const section = document.createElement('div');
     section.className = 'category-group';
     section.innerHTML = `
@@ -555,10 +583,21 @@ function renderProjects() {
         <span class="category-dot" style="background:${group.key}"></span>
         <span class="category-name${group.name ? '' : ' unnamed'}">${group.name ? escapeHtml(group.name) : 'Unnamed category'}</span>
         <span class="category-count">${group.projects.length}</span>
-        <button class="icon-btn category-rename" title="Name this category">✏️</button>
+        ${group.category ? `
+          <button class="icon-btn category-add" title="New project in this category">➕</button>
+          <button class="icon-btn category-edit" title="Edit this category">✏️</button>` : ''}
       </div>
     `;
-    section.querySelector('.category-rename').addEventListener('click', () => openCategoryModal(group.key));
+    if (group.category) {
+      section.querySelector('.category-add').addEventListener('click', () => openProjectModal(null, group.category.id));
+      section.querySelector('.category-edit').addEventListener('click', () => openCategoryModal(group.category));
+    }
+    if (group.projects.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'hint-text category-empty';
+      empty.textContent = 'No projects in this category yet.';
+      section.appendChild(empty);
+    }
     for (const p of group.projects) {
       const row = document.createElement('div');
       row.className = 'project-row';
@@ -576,39 +615,89 @@ function renderProjects() {
   }
 }
 
-// Names (or renames) the category with this left color by writing the name
-// onto every project in it; an empty name clears it.
-function openCategoryModal(color) {
-  const key = categoryKey(color);
-  const members = state.projects.filter((q) => categoryKey(q.color) === key);
-  const current = categoryName(key);
+// Adds a category (category === null) or edits one's name and color. A new
+// color is applied to every project in it (via normalizeProjects() on
+// reload). Only an empty category can be deleted. `onCreated` lets the
+// project form continue with the category just made.
+function openCategoryModal(category, onCreated = null) {
+  const isEdit = !!category;
+  const used = new Set(state.categories.filter((c) => c !== category).map((c) => categoryKey(c.color)));
+  let color = isEdit ? categoryKey(category.color) : (PROJECT_COLORS.find((c) => !used.has(c)) || PROJECT_COLORS[0]);
+  const palette = [...new Set([...PROJECT_COLORS, ...state.categories.map((c) => categoryKey(c.color)), color])];
+  const members = isEdit ? state.projects.filter((q) => q.categoryId === category.id) : [];
   openModal(`
-    <h2>${current ? 'Rename category' : 'Name category'}</h2>
+    <h2>${isEdit ? 'Edit category' : 'New category'}</h2>
     <div class="field">
-      <label><span class="category-dot" style="background:${key}"></span> Category name</label>
-      <input type="text" id="cf-name" value="${escapeHtml(current)}" placeholder="e.g. Music" />
+      <label>Name</label>
+      <input type="text" id="cf-name" value="${escapeHtml(isEdit ? category.name : '')}" placeholder="e.g. Arts" />
     </div>
-    <p class="hint-text">${members.length} project${members.length === 1 ? '' : 's'} with this left color: ${members.map((q) => escapeHtml(q.name)).join(', ')}. Leave the name empty to clear it.</p>
+    <div class="field">
+      <label>Color <span class="color-preview" id="cf-preview"></span></label>
+      <div class="color-field-label">The left half of every project in this category. Colors already used by another category are marked with a dot.</div>
+      <div class="color-swatches" id="cf-colors"></div>
+    </div>
+    ${isEdit ? `<p class="hint-text">${members.length ? `${members.length} project${members.length === 1 ? '' : 's'}: ${members.map((q) => escapeHtml(q.name)).join(', ')}. Move or delete them to delete this category.` : 'No projects in this category.'}</p>` : ''}
+    <p class="hint-text" id="cf-error"></p>
     <div class="modal-actions">
       <button class="btn btn-secondary" id="cat-cancel">Cancel</button>
+      ${isEdit && members.length === 0 ? '<button class="btn btn-danger" id="cat-delete">Delete</button>' : ''}
       <button class="btn" id="cat-save">Save</button>
     </div>
   `);
+  const renderSwatches = () => {
+    el('#cf-colors').innerHTML =
+      palette.map((c) => `<div class="color-swatch${c === color ? ' selected' : ''}${used.has(c) ? ' in-use' : ''}" style="background:${c}" data-color="${c}"></div>`).join('') +
+      `<label class="color-swatch color-custom" title="Custom color">+<input type="color" id="cf-custom" value="${color}"></label>`;
+    el('#cf-preview').style.background = color;
+  };
+  renderSwatches();
+  el('#cf-colors').addEventListener('click', (e) => {
+    const sw = e.target.closest('.color-swatch[data-color]');
+    if (!sw) return;
+    color = sw.dataset.color;
+    renderSwatches();
+  });
+  // As in the project form: only the preview follows the picker while it's
+  // open; the swatches are rebuilt once the choice is committed.
+  el('#cf-colors').addEventListener('input', (e) => {
+    if (!e.target.matches('input[type="color"]')) return;
+    color = e.target.value.toLowerCase();
+    el('#cf-preview').style.background = color;
+  });
+  el('#cf-colors').addEventListener('change', (e) => {
+    if (!e.target.matches('input[type="color"]')) return;
+    color = e.target.value.toLowerCase();
+    if (!palette.includes(color)) palette.push(color);
+    renderSwatches();
+  });
+
   const input = el('#cf-name');
   input.focus();
   input.select();
   const save = async () => {
-    const name = input.value.trim() || null;
-    for (const q of members) {
-      if ((q.category || null) === name) continue;
-      await saveProject({ ...q, category: name, updatedAt: Date.now() });
-    }
+    const name = input.value.trim();
+    if (!name) { el('#cf-error').textContent = 'Give the category a name.'; input.focus(); return; }
+    const clash = state.categories.find((c) => c !== category && c.name.toLowerCase() === name.toLowerCase());
+    if (clash) { el('#cf-error').textContent = `There is already a category named "${clash.name}".`; input.focus(); return; }
+    const updated = isEdit
+      ? { ...category, name, color, updatedAt: Date.now() }
+      : { id: uuid(), name, color, createdAt: Date.now(), updatedAt: Date.now() };
+    await saveCategory(updated);
     closeModal();
     await reload();
+    if (onCreated) onCreated(updated);
   };
   el('#cat-cancel').addEventListener('click', closeModal);
   el('#cat-save').addEventListener('click', save);
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+  if (el('#cat-delete')) {
+    el('#cat-delete').addEventListener('click', async () => {
+      await store.deleteCategory(category.id);
+      pushDeleteCategory(category.id);
+      closeModal();
+      await reload();
+    });
+  }
 }
 
 function renderSyncStatus() {
@@ -654,6 +743,11 @@ async function removeEntry(id) {
 async function saveProject(project) {
   await store.putProject(project);
   pushProject(project);
+}
+
+async function saveCategory(category) {
+  await store.putCategory(category);
+  pushCategory(category);
 }
 
 // Closes out an in-progress pause as of `atMs`, folding the paused duration
@@ -928,6 +1022,7 @@ function openExportModal() {
   const payload = {
     version: 1,
     exportedAt: new Date().toISOString(),
+    categories: state.categories,
     projects: state.projects,
     entries: state.entries,
   };
@@ -984,6 +1079,8 @@ function openImportModal() {
       el('#im-error').textContent = 'This does not look like exported TimeTracker data.';
       return;
     }
+    // Older exports have no categories; reload() then makes them from colors.
+    for (const c of Array.isArray(payload.categories) ? payload.categories : []) await saveCategory(c);
     for (const p of payload.projects) await saveProject(p);
     for (const e of payload.entries) await saveEntry(e);
     closeModal();
@@ -991,18 +1088,24 @@ function openImportModal() {
   });
 }
 
-function openProjectModal(project) {
+// `categoryId` preselects the category for a new project (from a category's
+// ➕ button). With no categories at all, one is made first.
+function openProjectModal(project, categoryId = null) {
   const isEdit = !!project;
-  const p = project || { id: null, name: '', color: PROJECT_COLORS[state.projects.length % PROJECT_COLORS.length], color2: null, archived: false };
-  let leftColor = isHexColor(p.color) ? p.color.toLowerCase() : PROJECT_COLORS[0];
+  if (state.categories.length === 0) {
+    openCategoryModal(null, (c) => openProjectModal(project, c.id));
+    return;
+  }
+  const categories = sortedCategories();
+  const p = project || { id: null, name: '', categoryId: categoryId || categories[0].id, color2: null, archived: false };
+  let catId = categoryById(p.categoryId) ? p.categoryId : (categoryId || categories[0].id);
+  const leftColor = () => categoryKey(categoryById(catId).color);
   let rightColor = isHexColor(p.color2) ? p.color2.toLowerCase() : null;
-  // The presets plus every color any project already uses, so a custom color
-  // picked once (say a topic's shared left color) shows up as a swatch for
-  // the others too and can be reused exactly rather than eyeballed.
+  // The presets plus every color already in use, so a custom color picked
+  // once shows up as a swatch for the others too.
   const palette = [...new Set([
     ...PROJECT_COLORS,
     ...state.projects.flatMap((q) => [q.color, q.color2]).filter(isHexColor).map((c) => c.toLowerCase()),
-    leftColor,
     ...(rightColor ? [rightColor] : []),
   ])];
 
@@ -1013,10 +1116,14 @@ function openProjectModal(project) {
       <input type="text" id="pf-name" value="${escapeHtml(p.name)}" placeholder="e.g. Client Website" />
     </div>
     <div class="field">
+      <label>Category</label>
+      <div class="category-picker" id="pf-categories">
+        ${categories.map((c) => `<button type="button" class="category-choice" data-id="${c.id}"><span class="category-dot" style="background:${categoryKey(c.color)}"></span>${c.name ? escapeHtml(c.name) : '<em>Unnamed category</em>'}</button>`).join('')}
+      </div>
+    </div>
+    <div class="field">
       <label>Color <span class="color-preview" id="pf-preview"></span></label>
-      <div class="color-field-label">Left half &mdash; category color (share it across related projects) <span id="pf-category"></span></div>
-      <div class="color-swatches" id="pf-colors-left"></div>
-      <div class="color-field-label">Right half &mdash; this project</div>
+      <div class="color-field-label">Left half comes from the category. Right half &mdash; this project:</div>
       <div class="color-swatches" id="pf-colors-right"></div>
     </div>
     <div class="modal-actions">
@@ -1028,32 +1135,27 @@ function openProjectModal(project) {
 
   const swatchHtml = (c, selected) => `<div class="color-swatch${selected ? ' selected' : ''}" style="background:${c}" data-color="${c}"></div>`;
   const customHtml = (id, value) => `<label class="color-swatch color-custom" title="Custom color">+<input type="color" id="${id}" value="${value}"></label>`;
-  // The category a project joins is decided by its left color; keep its own
-  // name only while it stays in the same category.
-  const categoryFor = (color) => categoryName(color, p.id) || (categoryKey(color) === categoryKey(p.color) ? p.category || '' : '');
   const updatePreview = () => {
-    el('#pf-preview').style.background = projectSwatchCss({ color: leftColor, color2: rightColor });
-    const cat = categoryFor(leftColor);
-    el('#pf-category').textContent = cat ? `· ${cat}` : '· unnamed category';
+    el('#pf-preview').style.background = projectSwatchCss({ color: leftColor(), color2: rightColor });
   };
   function renderSwatches() {
-    el('#pf-colors-left').innerHTML =
-      palette.map((c) => swatchHtml(c, c === leftColor)).join('') + customHtml('pf-custom-left', leftColor);
+    for (const b of document.querySelectorAll('#pf-categories .category-choice')) b.classList.toggle('selected', b.dataset.id === catId);
     el('#pf-colors-right').innerHTML =
       `<div class="color-swatch color-none${rightColor === null ? ' selected' : ''}" data-color="" title="Solid color (no right half)">&#10005;</div>` +
-      palette.map((c) => swatchHtml(c, c === rightColor)).join('') + customHtml('pf-custom-right', rightColor || leftColor);
+      palette.map((c) => swatchHtml(c, c === rightColor)).join('') + customHtml('pf-custom-right', rightColor || leftColor());
     updatePreview();
   }
   renderSwatches();
 
-  // Delegated, since renderSwatches() replaces the swatch elements.
-  el('#pf-colors-left').addEventListener('click', (e) => {
-    const sw = e.target.closest('.color-swatch[data-color]');
-    if (!sw) return;
-    leftColor = sw.dataset.color;
+  el('#pf-categories').addEventListener('click', (e) => {
+    const b = e.target.closest('.category-choice');
+    if (!b) return;
+    catId = b.dataset.id;
     renderSwatches();
   });
-  el('#pf-colors-right').addEventListener('click', (e) => {
+  // Delegated, since renderSwatches() replaces the swatch elements.
+  const right = el('#pf-colors-right');
+  right.addEventListener('click', (e) => {
     const sw = e.target.closest('.color-swatch[data-color]');
     if (!sw) return;
     rightColor = sw.dataset.color || null;
@@ -1061,22 +1163,18 @@ function openProjectModal(project) {
   });
   // The picker fires `input` continuously while dragging; re-rendering then
   // would replace the <input> mid-interaction and close the picker, so only
-  // the preview updates live and the swatch rows are rebuilt once it commits.
-  for (const [side, setColor] of [['left', (c) => { leftColor = c; }], ['right', (c) => { rightColor = c; }]]) {
-    const container = el(`#pf-colors-${side}`);
-    container.addEventListener('input', (e) => {
-      if (!e.target.matches('input[type="color"]')) return;
-      setColor(e.target.value.toLowerCase());
-      updatePreview();
-    });
-    container.addEventListener('change', (e) => {
-      if (!e.target.matches('input[type="color"]')) return;
-      const c = e.target.value.toLowerCase();
-      setColor(c);
-      if (!palette.includes(c)) palette.push(c);
-      renderSwatches();
-    });
-  }
+  // the preview updates live and the swatch row is rebuilt once it commits.
+  right.addEventListener('input', (e) => {
+    if (!e.target.matches('input[type="color"]')) return;
+    rightColor = e.target.value.toLowerCase();
+    updatePreview();
+  });
+  right.addEventListener('change', (e) => {
+    if (!e.target.matches('input[type="color"]')) return;
+    rightColor = e.target.value.toLowerCase();
+    if (!palette.includes(rightColor)) palette.push(rightColor);
+    renderSwatches();
+  });
 
   el('#pf-cancel').addEventListener('click', closeModal);
   if (isEdit) {
@@ -1093,9 +1191,10 @@ function openProjectModal(project) {
     const updated = {
       id: p.id || uuid(),
       name,
-      color: leftColor,
+      categoryId: catId,
+      color: leftColor(),
       color2: rightColor || null,
-      category: categoryFor(leftColor) || null,
+      category: categoryById(catId).name || null,
       archived: p.archived || false,
       createdAt: p.id ? p.createdAt : Date.now(),
       updatedAt: Date.now(),
@@ -1293,6 +1392,7 @@ el('#pause-btn').addEventListener('click', togglePause);
 el('#start-at-btn').addEventListener('click', openStartAtModal);
 el('#end-at-btn').addEventListener('click', openEndAtModal);
 el('#add-project-btn').addEventListener('click', () => openProjectModal(null));
+el('#add-category-btn').addEventListener('click', () => openCategoryModal(null));
 el('#add-entry-btn').addEventListener('click', () => openEntryModal(null));
 
 el('#week-prev-btn').addEventListener('click', () => {

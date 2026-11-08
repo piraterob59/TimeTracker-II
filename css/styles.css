@@ -447,6 +447,14 @@ html, body {
   padding: 12px 14px;
 }
 
+/* Projects tab: "+ New category" / "+ New project" side by side */
+.projects-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.projects-actions .btn { flex: 1; }
+
 /* Projects tab: one group per category (shared left color) */
 .category-group {
   display: flex;
@@ -496,8 +504,45 @@ html, body {
 }
 
 .category-header .icon-btn {
-  margin-left: auto;
   font-size: 15px;
+}
+.category-header .icon-btn:first-of-type { margin-left: auto; }
+
+.category-empty { margin: 0 4px; }
+
+/* Project form: one button per category, the chosen one outlined */
+.category-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.category-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.category-choice.selected { border-color: var(--text); font-weight: 700; }
+
+/* Category form: a color another category already uses */
+.color-swatch.in-use { position: relative; }
+.color-swatch.in-use::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: #fff;
 }
 
 .project-row .entry-color {
