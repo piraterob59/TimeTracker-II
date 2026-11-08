@@ -105,6 +105,18 @@ async function ensureDefaultDiet() {
       }
       localStorage.setItem(MEALS_RENAME_FLAG, '1');
     }
+  } catch { return; }
+  // A device can create the default before another device's own Meals (or
+  // Diet) has synced in, leaving two. The user's own one is the default then:
+  // the auto-made one is removed, unless points were already recorded on it.
+  const auto = state.projects.find((p) => p.id === 'diet');
+  const own = state.projects.find((p) => p.id !== 'diet' && ['diet', 'meals'].includes(p.name.trim().toLowerCase()));
+  if (auto && own && !state.points.some((r) => r.projectId === 'diet')) {
+    await store.deleteProject('diet');
+    pushDeleteProject('diet');
+    state.projects = state.projects.filter((p) => p.id !== 'diet');
+  }
+  try {
     if (localStorage.getItem(DEFAULT_DIET_FLAG)) return;
   } catch { return; }
   if (!state.projects.some((p) => p.id === 'diet' || ['diet', 'meals'].includes(p.name.trim().toLowerCase()))) {
@@ -210,11 +222,11 @@ function weekStart(date) {
 async function reload() {
   state.categories = await store.getAllCategories();
   state.projects = await store.getAllProjects();
+  state.points = await store.getAllPoints(); // before ensureDefaultDiet(), which checks them
   await ensureDefaultDiet();
   if (await normalizeProjects()) state.projects = await store.getAllProjects();
   state.projectsById = new Map(state.projects.map((p) => [p.id, p]));
   state.entries = await store.getAllEntries();
-  state.points = await store.getAllPoints();
   state.running = state.entries.find((e) => e.end === null) || null;
   renderAll();
   syncAppBadge();
