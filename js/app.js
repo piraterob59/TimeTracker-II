@@ -86,6 +86,35 @@ const groupPoints = (row, g) => Math.min(g.max, Math.max(0, (row && row.values &
 const pointsTotal = (p, row) => pointGroupsOf(p).reduce((sum, g) => sum + groupPoints(row, g), 0);
 const defaultPointGroups = () => ['Breakfast', 'Lunch', 'Dinner'].map((name) => ({ id: uuid(), name, max: 3 }));
 
+// Every install comes with a Diet points project (3 meals, 3 points each) so
+// there's a meals score on the Today tab every day. Its ids are fixed, so
+// devices that each create it before syncing end up with the same project.
+// Made once per device: if it's deleted it stays deleted (archive hides it).
+const DEFAULT_DIET_FLAG = 'tt_default_diet_created';
+async function ensureDefaultDiet() {
+  try {
+    if (localStorage.getItem(DEFAULT_DIET_FLAG)) return;
+  } catch { return; }
+  if (!state.projects.some((p) => p.id === 'diet' || p.name.trim().toLowerCase() === 'diet')) {
+    const personal = state.categories.find((c) => c.name.toLowerCase() === 'personal');
+    const project = {
+      id: 'diet',
+      name: 'Diet',
+      kind: 'points',
+      pointGroups: ['Breakfast', 'Lunch', 'Dinner'].map((name) => ({ id: name.toLowerCase(), name, max: 3 })),
+      // Without a Personal category, normalizeProjects() files it by color.
+      ...(personal ? { categoryId: personal.id, color: personal.color, category: personal.name } : { color: '#16a34a', category: null }),
+      color2: null,
+      archived: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await saveProject(project);
+    state.projects.push(project);
+  }
+  try { localStorage.setItem(DEFAULT_DIET_FLAG, '1'); } catch { /* retried next load */ }
+}
+
 const state = {
   points: [],
   pointsDate: null, // day shown in Today's points card (YYYY-MM-DD); null = today
@@ -169,6 +198,7 @@ function weekStart(date) {
 async function reload() {
   state.categories = await store.getAllCategories();
   state.projects = await store.getAllProjects();
+  await ensureDefaultDiet();
   if (await normalizeProjects()) state.projects = await store.getAllProjects();
   state.projectsById = new Map(state.projects.map((p) => [p.id, p]));
   state.entries = await store.getAllEntries();
