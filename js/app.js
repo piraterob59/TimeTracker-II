@@ -73,16 +73,21 @@ async function normalizeProjects() {
 }
 
 // A project either tracks time (the default) or, with kind 'points', a daily
-// score: `pointGroups` is a list of { id, name, max } (Diet: Breakfast,
-// Lunch, Dinner, 3 each). Each day's score is one row in `points`,
+// score: `pointGroups` is a list of { id, name, max, fullByDefault } (Diet:
+// Breakfast, Lunch, Dinner, 3 each). Each day's score is one row in `points`,
 // { id: `${projectId}_${date}`, projectId, date, values: { groupId: n } };
 // the id is per project per day so devices editing the same day share a row.
+// A group with `fullByDefault` counts as full on any day it hasn't been
+// tapped; tapping it down stores the lower value (0 included) as usual.
 const isPointsProject = (p) => !!p && p.kind === 'points';
 const pointGroupsOf = (p) => (isPointsProject(p) && Array.isArray(p.pointGroups) ? p.pointGroups : []);
 const pointsMax = (p) => pointGroupsOf(p).reduce((sum, g) => sum + g.max, 0);
 const pointsRowId = (projectId, date) => `${projectId}_${date}`;
 const pointsRow = (projectId, date) => state.points.find((r) => r.id === pointsRowId(projectId, date)) || null;
-const groupPoints = (row, g) => Math.min(g.max, Math.max(0, (row && row.values && row.values[g.id]) || 0));
+const groupPoints = (row, g) => {
+  const stored = row && row.values && typeof row.values[g.id] === 'number' ? row.values[g.id] : null;
+  return Math.min(g.max, Math.max(0, stored ?? (g.fullByDefault ? g.max : 0)));
+};
 const pointsTotal = (p, row) => pointGroupsOf(p).reduce((sum, g) => sum + groupPoints(row, g), 0);
 const defaultPointGroups = () => ['Breakfast', 'Lunch', 'Dinner'].map((name) => ({ id: uuid(), name, max: 3 }));
 
@@ -523,8 +528,9 @@ const shiftDateKey = (key, days) => {
 };
 
 // Today tab: one block per points project for the chosen day, each group a
-// row of dots. Tapping dot k sets that group to k points; tapping the last
-// filled dot takes one away (so a single tap can also clear a group).
+// column: its name on the top row, its dots beneath. Tapping dot k sets that
+// group to k points; tapping the last filled dot takes one away (so a single
+// tap can also clear a group).
 function renderPointsToday() {
   const projects = activePointsProjects();
   el('#points-card').classList.toggle('hidden', projects.length === 0);
@@ -542,14 +548,16 @@ function renderPointsToday() {
           <span class="points-project-name">${escapeHtml(p.name)}</span>
           <span class="points-total">${pointsTotal(p, row)} / ${pointsMax(p)}</span>
         </div>
-        ${pointGroupsOf(p).map((g) => {
-          const v = groupPoints(row, g);
-          return `
-            <div class="points-group">
-              <span class="points-group-name">${escapeHtml(g.name)}</span>
-              <span class="points-dots">${Array.from({ length: g.max }, (_, i) => `<button type="button" class="points-dot${i < v ? ' filled' : ''}" data-project="${p.id}" data-group="${g.id}" data-n="${i + 1}" aria-label="${escapeHtml(g.name)} ${i + 1} point${i ? 's' : ''}"></button>`).join('')}</span>
-            </div>`;
-        }).join('')}
+        <div class="points-groups">
+          ${pointGroupsOf(p).map((g) => {
+            const v = groupPoints(row, g);
+            return `
+              <div class="points-group">
+                <span class="points-group-name">${escapeHtml(g.name)}</span>
+                <span class="points-dots">${Array.from({ length: g.max }, (_, i) => `<button type="button" class="points-dot${i < v ? ' filled' : ''}" data-project="${p.id}" data-group="${g.id}" data-n="${i + 1}" aria-label="${escapeHtml(g.name)} ${i + 1} point${i ? 's' : ''}"></button>`).join('')}</span>
+              </div>`;
+          }).join('')}
+        </div>
       </div>`;
   }).join('');
 }
@@ -1361,6 +1369,7 @@ function openProjectModal(project, categoryId = null) {
       <div class="points-group-edit" data-i="${i}">
         <input type="text" class="pg-name" value="${escapeHtml(g.name)}" placeholder="e.g. Breakfast" />
         <input type="number" class="pg-max" min="1" max="9" value="${g.max}" aria-label="Maximum points" />
+        <label class="pg-default" title="Count this group as full until it's tapped"><input type="checkbox" class="pg-full"${g.fullByDefault ? ' checked' : ''} />On</label>
         <button type="button" class="icon-btn pg-remove" title="Remove group">✕</button>
       </div>`).join('');
     updatePointsMax();
@@ -1376,6 +1385,7 @@ function openProjectModal(project, categoryId = null) {
     const g = groups[Number(e.target.closest('.points-group-edit').dataset.i)];
     if (e.target.matches('.pg-name')) g.name = e.target.value;
     if (e.target.matches('.pg-max')) g.max = Math.min(9, Math.max(1, Math.round(Number(e.target.value)) || 1));
+    if (e.target.matches('.pg-full')) g.fullByDefault = e.target.checked;
     updatePointsMax();
   });
   el('#pf-groups').addEventListener('click', (e) => {
@@ -1430,7 +1440,7 @@ function openProjectModal(project, categoryId = null) {
   el('#pf-save').addEventListener('click', async () => {
     const name = el('#pf-name').value.trim();
     if (!name) { el('#pf-name').focus(); return; }
-    const pointGroups = groups.map((g) => ({ ...g, name: g.name.trim() }));
+    const pointGroups = groups.map((g) => ({ ...g, name: g.name.trim(), fullByDefault: !!g.fullByDefault }));
     if (kind === 'points' && (pointGroups.length === 0 || pointGroups.some((g) => !g.name))) {
       el('#pf-error').textContent = pointGroups.length ? 'Give every point group a name.' : 'Add at least one point group.';
       return;

@@ -751,19 +751,26 @@ textarea {
 .points-project-head .entry-color { width: 16px; height: 16px; }
 .points-project-name { flex: 1; font-weight: 700; }
 .points-total { font-weight: 700; font-variant-numeric: tabular-nums; }
-.points-group {
+/* Groups side by side: names on one row, each group's dots beneath its name */
+.points-groups {
   display: flex;
-  align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 4px 0 4px 26px;
+  padding: 4px 0;
 }
-.points-group-name { color: var(--text-dim); font-size: 14px; }
-.points-dots { display: flex; gap: 10px; }
-/* Big enough to tap reliably on a phone */
+.points-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.points-group-name { color: var(--text-dim); font-size: 14px; white-space: nowrap; }
+.points-dots { display: flex; gap: 6px; }
+/* Big enough to tap reliably on a phone, small enough for four groups across */
 .points-dot {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   border: 2px solid var(--text-dim);
   background: transparent;
@@ -823,6 +830,14 @@ textarea {
 }
 .points-group-edit .pg-name { flex: 1; min-width: 0; }
 .points-group-edit .pg-max { width: 64px; flex: 0 0 auto; }
+.points-group-edit .pg-default {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  font-size: 13px;
+  color: var(--text-dim);
+}
 .points-max-label { font-weight: 400; color: var(--text-dim); }
 .points-badge {
   margin-left: 8px;
