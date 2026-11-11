@@ -767,6 +767,8 @@ textarea {
   gap: 5px;
   min-width: 0;
 }
+/* The last group (e.g. CB) takes the rest of the row and sits centered in it */
+.points-group:last-child { flex: 1; }
 .points-group-name { color: var(--text-dim); font-size: 13px; white-space: nowrap; }
 .points-dots { display: flex; gap: 4px; }
 .points-dot {
