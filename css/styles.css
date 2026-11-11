@@ -751,26 +751,27 @@ textarea {
 .points-project-head .entry-color { width: 16px; height: 16px; }
 .points-project-name { flex: 1; font-weight: 700; }
 .points-total { font-weight: 700; font-variant-numeric: tabular-nums; }
-/* Groups side by side: names on one row, each group's dots beneath its name */
+/* Groups side by side: names on one row, each group's dots beneath its name.
+   Sized so Breakfast/Lunch/Dinner (3 each) plus a 1-dot group fit across an
+   iPhone 14 in portrait (390px) with a small gap between groups. */
 .points-groups {
   display: flex;
-  justify-content: space-between;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 6px 18px;
   padding: 4px 0;
 }
 .points-group {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
-.points-group-name { color: var(--text-dim); font-size: 14px; white-space: nowrap; }
-.points-dots { display: flex; gap: 6px; }
-/* Big enough to tap reliably on a phone, small enough for four groups across */
+.points-group-name { color: var(--text-dim); font-size: 13px; white-space: nowrap; }
+.points-dots { display: flex; gap: 4px; }
 .points-dot {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   border: 2px solid var(--text-dim);
   background: transparent;
